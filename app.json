@@ -1,23 +1,23 @@
 {
   "configVersion": "v2",
   "app": {
-    "appId": 28962,
-    "appName": "WatchDrip+",
+    "appId": 43107,
+    "appName": "WatchDrip2_zepp",
     "appType": "app",
     "version": {
-      "code": 3,
-      "name": "2.0.7"
+      "code": 4,
+      "name": "1.0.0"
     },
-    "vender": "bigdigital",
+    "vender": "n23ai",
     "description": "The watchface for watchdrip application",
     "icon": "icon.png"
   },
-  "permissions": ["data:os.device.info", "device:os.alarm", "device:os.ble"],
+  "permissions": ["data:os.device.info", "device:os.alarm", "device:os.ble", "device:os.bg_service"],
   "runtime": {
     "apiVersion": {
-      "compatible": "1.0.0",
-      "target": "1.0.1",
-      "minVersion": "1.0.0"
+      "compatible": "3.0.0",
+      "target": "3.0.0",
+      "minVersion": "3.0.0"
     }
   },
   "targets": {
@@ -28,6 +28,9 @@
         },
         "app-side": {
           "path": "app-side/index"
+        },
+        "app-service": {
+          "services": ["app-service/index"]
         }
       },
       "platforms": [
@@ -80,133 +83,41 @@
         },
         "app-side": {
           "path": "app-side/index"
+        },
+        "app-service": {
+          "services": ["app-service/index"]
+        },
+        "setting": {
+          "path": "setting/index"
+        },
+        "app-widget": {
+          "widgets": [
+            {
+              "path": "data-widget/index",
+              "name": "WatchDrip2 Widget",
+              "icon": "icon.png",
+              "preview": "icon.png",
+              "runtime": {
+                "type": "js"
+              }
+            }
+          ]
+        },
+        "secondary-widget": {
+          "widgets": [
+            {
+              "path": "data-widget/index",
+              "name": "WatchDrip2 Widget",
+              "icon": "icon.png",
+              "preview": "icon.png",
+              "runtime": {
+                "type": "js"
+              }
+            }
+          ]
         }
       },
       "platforms": [
-        {
-          "name": "gtr3-pro",
-          "deviceSource": 229
-        },
-        {
-          "name": "gtr3-pro-w",
-          "deviceSource": 230
-        },
-        {
-          "name": "gtr3-pro-le1",
-          "deviceSource": 241
-        },
-        {
-          "name": "gtr3-pro-le2",
-          "deviceSource": 242
-        },
-        {
-          "name": "gtr3-pro-merlin",
-          "deviceSource": 6095106
-        },
-        {
-          "name": "gtr3",
-          "deviceSource": 226
-        },
-        {
-          "name": "gtr3-w",
-          "deviceSource": 227
-        },
-        {
-          "name": "t-rex2",
-          "deviceSource": 418
-        },
-        {
-          "name": "t-rex2-w",
-          "deviceSource": 419
-        },
-        {
-          "name": "gts3",
-          "deviceSource": 224
-        },
-        {
-          "name": "gts3-w",
-          "deviceSource": 225
-        },
-        {
-          "name": "active1",
-          "deviceSource": 8323328
-        },
-        {
-          "name": "active2",
-          "deviceSource": 8323329
-        },
-        {
-          "name": "active2_1",
-          "deviceSource": 8913152
-        },
-        {
-          "name": "active2_2",
-          "deviceSource": 8913153
-        },
-        {
-          "name": "active2_3",
-          "deviceSource": 8913155
-        },
-        {
-          "name": "active2_4",
-          "deviceSource": 8913159
-        },
-        {
-          "name": "active2_5",
-          "deviceSource": 10092800
-        },
-        {
-          "name": "active2_6",
-          "deviceSource": 10092801
-        },
-        {
-          "name": "active2_7",
-          "deviceSource": 10092803
-        },
-        {
-          "name": "active2_8",
-          "deviceSource": 10092807
-        },
-        {
-          "name": "gts4",
-          "deviceSource": 7995648
-        },
-        {
-          "name": "gts4-w",
-          "deviceSource": 7995649
-        },
-        {
-          "name": "gtr4",
-          "deviceSource": 7930112
-        },
-        {
-          "name": "gtr4-w",
-          "deviceSource": 7930113
-        },
-        {
-          "name": "gtr4-w2",
-          "deviceSource": 7864577
-        },
-        {
-          "name": "falcon1",
-          "deviceSource": 414
-        },
-        {
-          "name": "falcon2",
-          "deviceSource": 415
-        },
-        {
-          "name": "band7",
-          "deviceSource": 252
-        },
-        {
-          "name": "band7_1",
-          "deviceSource": 253
-        },
-        {
-          "name": "band7_2",
-          "deviceSource": 254
-        },
         {
           "name": "balance_1",
           "deviceSource": 8519936
@@ -220,46 +131,6 @@
           "deviceSource": 8519939
         },
         {
-          "name": "cheetah_square",
-          "deviceSource": 8257793
-        },
-        {
-          "name": "cheetah_round_1",
-          "deviceSource": 8192256
-        },
-        {
-          "name": "cheetah_round_2",
-          "deviceSource": 8192257
-        },
-        {
-          "name": "trex_ultra_1",
-          "deviceSource": 6553856
-        },
-        {
-          "name": "trex_ultra_2",
-          "deviceSource": 6553857
-        },
-        {
-          "name": "bip_5",
-          "deviceSource": 8454401
-        },
-        {
-          "name": "bip_5_2",
-          "deviceSource": 8454400
-        },
-        {
-          "name": "bip_5_unity",
-          "deviceSource": 8782081
-        },
-        {
-          "name": "bip_5_unity_2",
-          "deviceSource": 8782088
-        },
-        {
-          "name": "bip_5_unity_3",
-          "deviceSource": 8782089
-        },
-        {
           "name": "cheetah_pro_1",
           "deviceSource": 8126720
         },
@@ -268,128 +139,32 @@
           "deviceSource": 8126721
         },
         {
-          "name": "gtr_mini_1",
-          "deviceSource": 250
+          "name": "Munich3S",
+          "deviceSource": 9978112
         },
         {
-          "name": "gtr_mini_2",
-          "deviceSource": 251
+          "name": "MunichWN3S",
+          "deviceSource": 9978113
         },
         {
-          "name": "gts_mini_1",
-          "deviceSource": 246
-        },
-        {
-          "name": "gts_mini_2",
-          "deviceSource": 247
-        },
-        {
-          "name": "trex3",
-          "deviceSource": 8716547
-        },
-        {
-          "name": "trex3_1",
-          "deviceSource": 8716544
-        },
-        {
-          "name": "trex3_2",
-          "deviceSource": 8716545
-        },
-	      {          
-          "name": "bip6-1",
+          "name": "bip6_1",
           "deviceSource": 9765120
         },
-	      {          
-          "name": "bip6-2",
+        {
+          "name": "bip6_2",
           "deviceSource": 9765121
         },
-        {          
-          "name": "bip6-3",
+        {
+          "name": "bip6_3",
           "deviceSource": 10158337
         },
-        {          
-          "name": "balance2-1",
-          "deviceSource": 9568512
-        },
-        {          
-          "name": "balance2-2",
-          "deviceSource": 9568513
-        },
-        {          
-          "name": "balance2-3",
-          "deviceSource": 9568515
-        },
-        {          
-          "name": "balance2xt-1",
-          "deviceSource": 10486019
-        },
-        {          
-          "name": "balance2xt-2",
-          "deviceSource": 10486017
-        },
-        {          
-          "name": "balance2xt-3",
-          "deviceSource": 10486016
-        },
-        {          
-          "name": "trex3pro-1",
-          "deviceSource": 10682624
-        },
-        {          
-          "name": "trex3pro-2",
-          "deviceSource": 10682625
-        },
-        {          
-          "name": "trex3pro-3",
-          "deviceSource": 10682627
-        },
-        {          
-          "name": "trex3pro-4",
-          "deviceSource": 10551555
-        },
-        {          
-          "name": "trex3pro-5",
-          "deviceSource": 10551553
-        },
-        {          
-          "name": "trex3pro-6",
-          "deviceSource": 10551552
-        },
         {
-          "name": "ActiveMax_1",
-          "deviceSource": 10813699
-        },
-        {
-          "name": "ActiveMax_2",
+          "name": "active_max_1",
           "deviceSource": 10813697
         },
         {
-          "name": "TRex_Ultra2_1",
-          "deviceSource": 10879233
-        },
-        {
-          "name": "TRex_Ultra2_2",
-          "deviceSource": 10879232
-        },
-        {
-          "name": "TRex_Ultra2_3",
-          "deviceSource": 10879235
-        },
-        {
-          "name": "Active3premium_1",
-          "deviceSource": 10948867
-        },
-        {
-          "name": "Active3premium_2",
-          "deviceSource": 10944771
-        },
-        {
-          "name": "Active3premium_3",
-          "deviceSource": 10944769
-        },
-        {
-          "name": "Active3premium_4",
-          "deviceSource": 10944768
+          "name": "active_max_2",
+          "deviceSource": 10813699
         }
       ],
       "designWidth": 480
@@ -397,7 +172,38 @@
   },
   "i18n": {
     "en-US": {
-      "appName": "WatchDrip+"
+      "appName": "WatchDrip2",
+      "app-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
+      },
+      "secondary-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
+      }
+    },
+    "ru-RU": {
+      "appName": "WatchDrip2",
+      "app-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
+      },
+      "secondary-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
+      }
     }
   },
   "defaultLanguage": "en-US",

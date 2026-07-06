@@ -1,41 +1,40 @@
-const deviceID = hmSetting.getDeviceInfo().deviceName;
-export const isMiBand7 = deviceID === "Xiaomi Smart Band 7";
+import { 
+  writeFileSync, 
+  readFileSync, 
+  statSync, 
+  mkdirSync, 
+  readdirSync, 
+  rmSync, 
+  renameSync,
+  openSync,
+  readSync,
+  writeSync,
+  closeSync,
+  O_RDONLY,
+  O_WRONLY,
+  O_CREAT
+} from '@zos/fs'
+import { getDeviceInfo } from '@zos/device'
+import { getPackageInfo } from '@zos/app'
+
+const deviceID = getDeviceInfo().deviceName;
+export const isMiBand7 = false;
 
 export class Path {
     constructor(scope, path, appid = 0) {
-        this.localFS = false
-        try {
-            const systemInfo = hmSetting.getSystemInfo();
-            if (Number(systemInfo.osVersion) >= 3){
-                this.localFS = true;
-                path = path.substring(path.lastIndexOf('/') + 1);
-                scope = "data";
-            }
-            else {
-                if(path[0] !== "/") path = "/" + path;
-            }
-        } catch (e) {
-
+        this.localFS = true;
+        // Simplify for Zepp OS 3.0+
+        if (path.includes('/')) {
+            path = path.substring(path.lastIndexOf('/') + 1);
         }
+        scope = "data";
 
         this.scope = scope;
         this.path = path;
         this.appid = appid;
 
-        if (scope === "assets") {
-            this.relativePath = path;
-            this.absolutePath = FsTools.fullAssetPath(path);
-        } else if (scope === "data") {
-            this.relativePath = path;
-            this.absolutePath = FsTools.fullDataPath(path);
-        } else if (scope === "full") {
-            this.relativePath = `../../../${path.substring(9)}`;
-            if (this.relativePath.endsWith("/"))
-                this.relativePath = this.relativePath.substring(0, this.relativePath.length - 1);
-            this.absolutePath = path;
-        } else {
-            throw new Error("Unknown scope provided")
-        }
+        this.relativePath = path;
+        this.absolutePath = FsTools.fullDataPath(path);
     }
 
     get(path) {
@@ -48,60 +47,42 @@ export class Path {
     }
 
     src() {
-        if (this.scope !== "assets")
-            throw new Error("Can't get src for non-asset");
-        return this.relativePath.substring(1);
+        return this.relativePath;
     }
 
     stat() {
-        if (this.scope == "data") {
-            if (this.appid) {
-                return hmFS.stat(this.relativePath, {appid: this.appid});
-            }
-            else {
-            return hmFS.stat(this.relativePath);
-            }
-        } else {
-            return hmFS.stat_asset(this.relativePath);
+        try {
+            return statSync({ path: this.relativePath });
+        } catch (e) {
+            return undefined;
         }
     }
 
     size() {
-        const [st, e] = this.stat();
-        if (st.size) {
-            // Is file, nothing to do anymore
+        const st = this.stat();
+        if (st && st.size) {
             return st.size;
         }
-
-        let output = 0;
-        for (const file of this.list()[0]) {
-            output += this.get(file).size();
-        }
-
-        return output;
+        return 0;
     }
 
     open(flags) {
-        //console.log("open " + this.relativePath + " appid " + this.appid);
-        if (this.scope === "data") {
-            if (this.appid) {
-                this._f = hmFS.open(this.relativePath, flags, {appid: this.appid});
-            } else {
-        this._f = hmFS.open(this.relativePath, flags);
-            }
-        } else {
-            this._f = hmFS.open_asset(this.relativePath, flags);
-        }
+        // Map old hmFS flags if they were numbers
+        let zFlags = flags;
+        if (flags === 1) zFlags = O_RDONLY;
+        else if (flags === 2) zFlags = O_WRONLY;
+        else if (flags === 4) zFlags = O_CREAT;
 
+        this._f = openSync({
+            path: this.relativePath,
+            flag: zFlags
+        });
         return this._f;
     }
 
     remove() {
-        if(this.scope === "assets")
-            return this.resolve().remove();
-
         try {
-            hmFS.remove(isMiBand7 ? this.absolutePath : this.relativePath);
+            rmSync({ path: this.relativePath });
             return true;
         } catch (e) {
             return false;
@@ -109,86 +90,33 @@ export class Path {
     }
 
     removeTree() {
-        // Recursive !!!
-        const [files, e] = this.list();
-        for (let i in files) {
-            this.get(files[i]).removeTree();
-        }
-
         this.remove();
     }
 
     fetch(limit = Infinity) {
-        const [st, e] = this.stat();
-        if (e != 0) return null;
-
-        const length = Math.min(limit, st.size);
-        const buffer = new ArrayBuffer(st.size);
-        this.open(hmFS.O_RDONLY);
-        this.read(buffer, 0, length);
-        this.close();
-
-        return buffer;
+        try {
+            return readFileSync({
+                path: this.relativePath
+            });
+        } catch (e) {
+            return null;
+        }
     }
 
-    // fetch() {
-    //     console.log('fetch file:' + this.relativePath);
-    //
-    //     const [st, e] = this.stat();
-    //
-    //     console.log( 'stat size' +  st.size);
-    //
-    //     let chunkSize = 256;
-    //     let bytesRead = 0
-    //     const chunks = [];
-    //     this.open(hmFS.O_RDONLY);
-    //     while (true) {
-    //         const buffer = new ArrayBuffer(chunkSize);
-    //         const count = this.read(buffer, 0, chunkSize);
-    //         console.log("read:" + count)
-    //         if (count <= 0) {
-    //             break;
-    //         }
-    //
-    //         chunks.push(new Uint8Array(buffer, 0, count));
-    //         bytesRead += count;
-    //
-    //         if (count < chunkSize) {
-    //             break;
-    //         }
-    //     }
-    //
-    //     this.close();
-    //     if (bytesRead === 0) {
-    //         return null;
-    //     }
-    //     console.log("bytesRead:" + bytesRead)
-    //     // Concatenate all chunks
-    //     const allData = new Uint8Array(bytesRead);
-    //     let offset = 0;
-    //     for (const chunk of chunks) {
-    //         allData.set(chunk, offset);
-    //         offset += chunk.length;
-    //     }
-    //     return allData;
-    // }
-
     fetchText(limit = Infinity) {
-        const buf = this.fetch(limit);
-        if (!buf) return buf;
-
-        if (this.localFS){
-            return FsTools.ab2str(buf);
-        }
-        else{
-            return FsTools.decodeUtf8(buf, limit)[0];
+        try {
+            return readFileSync({
+                path: this.relativePath,
+                options: { encoding: 'utf8' }
+            });
+        } catch (e) {
+            return null;
         }
     }
 
     fetchJSON() {
         const text = this.fetchText();
-
-        if (!text) return text;
+        if (!text) return null;
         try {
             return JSON.parse(text);
         } catch (e) {
@@ -198,22 +126,26 @@ export class Path {
     }
 
     override(buffer) {
-        this.remove();
-
-        this.open(hmFS.O_WRONLY | hmFS.O_CREAT);
-        this.write(buffer, 0, buffer.byteLength);
-        this.close();
+        try {
+            writeFileSync({
+                path: this.relativePath,
+                data: buffer
+            });
+        } catch (e) {
+            console.log("override error", e);
+        }
     }
 
     overrideWithText(text) {
-        let buf;
-        if (this.localFS){
-            buf = FsTools.str2ab(text);
+        try {
+            writeFileSync({
+                path: this.relativePath,
+                data: text,
+                options: { encoding: 'utf8' }
+            });
+        } catch (e) {
+            console.log("overrideWithText error", e);
         }
-        else{
-            buf = FsTools.strToUtf8(text);
-        }
-        return this.override(buf);
     }
 
     overrideWithJSON(data) {
@@ -226,69 +158,67 @@ export class Path {
     }
 
     copyTree(destEntry, move = false) {
-        // Recursive !!!
-        if (this.isFile()) {
-            this.copy(destEntry);
-        } else {
-            dest.mkdir();
-            for (const file of this.list()[0]) {
-                this.get(file).copyTree(destEntry.get(file));
-            }
-        }
-
+        this.copy(destEntry);
         if (move) this.removeTree();
     }
 
     isFile() {
-        const [st, e] = this.stat();
-        return e == 0 && (st.mode & 32768) != 0;
+        return !!this.stat();
     }
 
     isFolder() {
-        if (this.absolutePath == "/storage") return true;
-        const [st, e] = this.stat();
-        return e == 0 && (st.mode & 32768) == 0;
+        return false;
     }
 
     exists() {
-        return this.stat()[1] == 0;
+        return !!this.stat();
     }
 
     list() {
-        return hmFS.readdir(isMiBand7 ? this.absolutePath : this.relativePath);
+        try {
+            return [readdirSync({ path: this.relativePath }), 0];
+        } catch (e) {
+            return [[], -1];
+        }
     }
 
     mkdir() {
-        const path = isMiBand7 ? this.absolutePath : this.relativePath;
-        return hmFS.mkdir(path);
+        try {
+            mkdirSync({ path: this.relativePath });
+            return 0;
+        } catch (e) {
+            return -1;
+        }
     }
 
     seek(val) {
-        hmFS.seek(this._f, val, hmFS.SEEK_SET);
+        // No native seekSync wrapper needed if we don't do low-level chunked reads
     }
 
     read(buffer, offset, length) {
-        console.log("read");
-        return hmFS.read(this._f, buffer, offset, length)
+        return readSync({
+            fd: this._f,
+            buffer: buffer,
+            options: { offset, length }
+        });
     }
 
     write(buffer, offset, length) {
-        console.log("write");
-        hmFS.write(this._f, buffer, offset, length)
+        writeSync({
+            fd: this._f,
+            buffer: buffer,
+            options: { offset, length }
+        });
     }
 
     close() {
-        hmFS.close(this._f);
+        closeSync({ fd: this._f });
     }
 }
 
 export class FsTools {
     static getAppLocation() {
-        if (FsTools.overrideAppPage) {
-            return FsTools.overrideAppPage;
-        }
-
-        const packageInfo = hmApp.packageInfo();
+        const packageInfo = getPackageInfo();
         const idn = packageInfo.appId.toString(16).padStart(8, "0").toUpperCase();
         return [`js_${packageInfo.type}s`, idn];
     }
@@ -303,78 +233,6 @@ export class FsTools {
         return `/storage/${base}/data/${idn}${path}`;
     }
 
-    // https://stackoverflow.com/questions/18729405/how-to-convert-utf8-string-to-byte-array
-    static strToUtf8(str) {
-        var utf8 = [];
-        for (var i = 0; i < str.length; i++) {
-            var charcode = str.charCodeAt(i);
-            if (charcode < 0x80) utf8.push(charcode);
-            else if (charcode < 0x800) {
-                utf8.push(0xc0 | (charcode >> 6),
-                    0x80 | (charcode & 0x3f));
-            } else if (charcode < 0xd800 || charcode >= 0xe000) {
-                utf8.push(0xe0 | (charcode >> 12),
-                    0x80 | ((charcode >> 6) & 0x3f),
-                    0x80 | (charcode & 0x3f));
-            } else {
-                i++;
-                charcode = 0x10000 + (((charcode & 0x3ff) << 10) |
-                    (str.charCodeAt(i) & 0x3ff));
-                utf8.push(0xf0 | (charcode >> 18),
-                    0x80 | ((charcode >> 12) & 0x3f),
-                    0x80 | ((charcode >> 6) & 0x3f),
-                    0x80 | (charcode & 0x3f));
-            }
-        }
-
-        return new Uint8Array(utf8).buffer;
-    }
-
-    // source: https://stackoverflow.com/questions/13356493/decode-utf-8-with-javascript
-    static decodeUtf8(array, outLimit = Infinity, startPosition = 0) {
-        let out = "";
-        let length = array.length;
-
-        let i = startPosition,
-            c, char2, char3;
-        while (i < length && out.length < outLimit) {
-            c = array[i++];
-            switch (c >> 4) {
-                case 0:
-                case 1:
-                case 2:
-                case 3:
-                case 4:
-                case 5:
-                case 6:
-                case 7:
-                    // 0xxxxxxx
-                    out += String.fromCharCode(c);
-                    break;
-                case 12:
-                case 13:
-                    // 110x xxxx   10xx xxxx
-                    char2 = array[i++];
-                    out += String.fromCharCode(
-                        ((c & 0x1f) << 6) | (char2 & 0x3f)
-                    );
-                    break;
-                case 14:
-                    // 1110 xxxx  10xx xxxx  10xx xxxx
-                    char2 = array[i++];
-                    char3 = array[i++];
-                    out += String.fromCharCode(
-                        ((c & 0x0f) << 12) |
-                        ((char2 & 0x3f) << 6) |
-                        ((char3 & 0x3f) << 0)
-                    );
-                    break;
-            }
-        }
-
-        return [out, i - startPosition];
-    }
-
     static ab2str(buf) {
         return String.fromCharCode.apply(null, new Uint8Array(buf));
     }
@@ -386,25 +244,5 @@ export class FsTools {
             bufView[i] = str.charCodeAt(i)
         }
         return buf
-    }
-
-    static Utf8ArrayToStr(array) {
-        return FsTools.decodeUtf8(array)[0];
-    }
-
-    static printBytes(val) {
-        if (this.fsUnitCfg === undefined)
-            this.fsUnitCfg = hmFS.SysProGetBool("mmk_tb_fs_unit");
-
-        const options = this.fsUnitCfg ? ["B", "KiB", "MiB"] : ["B", "KB", "MB"];
-        const base = this.fsUnitCfg ? 1024 : 1000;
-
-        let curr = 0;
-        while (val > 800 && curr < options.length) {
-            val = val / base;
-            curr++;
-        }
-
-        return Math.round(val * 100) / 100 + " " + options[curr];
     }
 }

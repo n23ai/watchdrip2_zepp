@@ -25,7 +25,7 @@ export class WatchdripData {
         if (this.getStatus().now == null) {
             this.timeDiff = 0;
         } else {
-            this.timeDiff = this.timeSensor.utc - this.getStatus().now;
+            this.timeDiff = this.timeSensor.getTime() - this.getStatus().now;
         }
     }
 
@@ -75,7 +75,7 @@ export class WatchdripData {
 
     isBgStale() {
         if (this.getBg().isHasData()) {
-            return this.getBg().isStale || (this.timeSensor.utc - this.getBg().time - this.timeDiff) > BG_STALE_TIME_MS;
+            return this.getBg().isStale || (this.timeSensor.getTime() - this.getBg().time - this.timeDiff) > BG_STALE_TIME_MS;
         } else {
             return false;
         }
@@ -84,6 +84,6 @@ export class WatchdripData {
     getTimeAgo(time) {
         if (time == null || 0) return "";
         let timeInt = parseInt(time);
-        return niceTime(this.timeSensor.utc - timeInt - this.timeDiff);
+        return niceTime(this.timeSensor.getTime() - timeInt - this.timeDiff);
     }
 }

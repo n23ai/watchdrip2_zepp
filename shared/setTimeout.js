@@ -1,9 +1,9 @@
-import { isHmTimerDefined } from "./js-module";
+import * as timer from "@zos/timer";
 import { getGlobal } from "./global";
 
 let globalNS = getGlobal();
 
-if (typeof setTimeout === "undefined" && isHmTimerDefined()) {
+if (typeof setTimeout === "undefined") {
   globalNS.clearTimeout = function clearTimeout(timerRef) {
     timerRef && timer.stopTimer(timerRef);
   };
@@ -57,3 +57,4 @@ if (typeof setTimeout === "undefined" && isHmTimerDefined()) {
     return timer1;
   };
 }
+

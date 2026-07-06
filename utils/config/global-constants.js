@@ -1,6 +1,6 @@
 import {ALARM_UPDATE_INTERVAL} from "./constants";
 
-export const WATCHDRIP_APP_ID = "28962";
+export const WATCHDRIP_APP_ID = "43107";
 
 
  export const WF_DIR = "/storage/js_apps/data/watchdrip";
@@ -9,7 +9,7 @@ export const WATCHDRIP_APP_ID = "28962";
 
 export const WATCHDRIP_SETTINGS_DEFAULTS = {
     disableUpdates: false,
-    showLog: false,
+    showLog: true,
     useAppFetch: false,
 };
 

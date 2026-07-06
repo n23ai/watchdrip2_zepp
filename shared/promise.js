@@ -1,4 +1,5 @@
 ;(function (global, factory) {
+  if (typeof global.Promise !== 'undefined') return;
   typeof exports === 'object' && typeof module !== 'undefined'
     ? factory()
     : typeof define === 'function' && define.amd
@@ -340,8 +341,10 @@
     if (typeof globalThis !== 'undefined') {
       return globalThis
     }
-
-    throw new Error('unable to locate global object')
+    try {
+        if (typeof DeviceRuntimeCore !== 'undefined') return DeviceRuntimeCore;
+    } catch(e) {}
+    return {}
   })()
 
   globalNS['Promise'] = Promise

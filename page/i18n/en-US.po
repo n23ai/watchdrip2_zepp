@@ -32,4 +32,4 @@ msgid "status_no_bt"
 msgstr "Please \"make\" sure\nthe bluetooth is enabled\non your phone"
 
 msgid "status_start_watchdrip"
-msgstr "Launch \"Watchdrip+\" app\non your phone and activate\n\"web server\" option"
+msgstr "Launch \"Watchdrip2\" app\non your phone and activate\n\"web server\" option"

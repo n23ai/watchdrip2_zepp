@@ -1,32 +1,30 @@
-
 import { zeroPad } from "./date";
-import {DEBUG_TEXT} from "../utils/config/styles";
-
-
-//this helper allows to display logs on the screen
-//Also you can use bridge mode to show logs from the app (need to enable logs inside zepp app development menu)
+import { DEBUG_TEXT } from "../utils/config/styles";
+import { createWidget, widget as zosWidget, prop } from "@zos/ui";
+import { Time } from "@zos/sensor";
+import { getScene, SCENE_AOD } from "@zos/app";
+import { log as zosLog } from "@zos/utils";
 
 export class DebugText {
     constructor() {
-        this.t = hmSensor.createSensor(hmSensor.id.TIME);
+        this.t = new Time();
         this.debugTextText = "";
-        this.widget = hmUI.createWidget(hmUI.widget.TEXT, DEBUG_TEXT);
+        this.widget = createWidget(zosWidget.TEXT, DEBUG_TEXT);
         this.lines = 0;
-        // this.enabled = true;
         this.enabled = false;
 
-        var loggerName = "watchdrip_app";
-        if (hmSetting.getScreenType() === hmSetting.screen_type.AOD){
+        let loggerName = "watchdrip_app";
+        if (getScene() === SCENE_AOD) {
             loggerName = loggerName + "-aod";
         }
-        this.logger = Logger.getLogger(loggerName);
+        this.logger = zosLog.getLogger(loggerName);
     }
 
     setLines(lines) {
         this.lines = lines;
     }
 
-    setEnabled(enabled){
+    setEnabled(enabled) {
         this.enabled = enabled;
         if (!enabled) {
             this.clean();
@@ -44,23 +42,21 @@ export class DebugText {
             this.getTime() + ":" + formatted + "\r\n";
         var lines = this.debugTextText.split("\r\n");
         if (this.lines !== 0 && lines.length > this.lines) {
-            // remove line, starting at the first position
             lines.splice(0, lines.length - 1 - this.lines);
         }
-        // join the array back into a single string
         this.debugTextText = lines.join("\r\n");
-        this.widget.setProperty(hmUI.prop.MORE, { text: this.debugTextText });
+        this.widget.setProperty(prop.MORE, { text: this.debugTextText });
     }
 
     getTime() {
         return (
-            zeroPad(this.t.hour) +
+            zeroPad(this.t.getHours()) +
             ":" +
-            zeroPad(this.t.minute) +
+            zeroPad(this.t.getMinutes()) +
             ":" +
-            zeroPad(this.t.second) +
+            zeroPad(this.t.getSeconds()) +
             "." +
-            zeroPad(this.t.utc % 1000, 4)
+            zeroPad(this.t.getTime() % 1000, 4)
         );
     }
 
@@ -100,6 +96,6 @@ export class DebugText {
 
     clean() {
         this.debugTextText = "";
-        this.widget.setProperty(hmUI.prop.MORE, { text: this.debugTextText });
+        this.widget.setProperty(prop.MORE, { text: this.debugTextText });
     }
 }

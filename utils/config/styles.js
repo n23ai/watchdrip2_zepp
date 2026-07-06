@@ -1,7 +1,8 @@
-import { gettext as getText } from "i18n";
-import {DEVICE_HEIGHT, DEVICE_WIDTH, DEVICE_SHAPE} from "./device";
-
-import {Colors} from "./constants";
+import { getText } from "@zos/i18n";
+import { DEVICE_HEIGHT, DEVICE_WIDTH, DEVICE_SHAPE } from "./device";
+import { Colors } from "./constants";
+import { px } from "@zos/utils";
+import { align, text_style } from "@zos/ui";
 
 export const DEVICE_TYPE = DEVICE_SHAPE ? 'round' : 'square'
 
@@ -11,7 +12,7 @@ var TEXT_HEIGHT = px(42);
 var BG_TIME_TEXT_X = DEVICE_WIDTH/2 + px(90);
 var BG_TIME_TEXT_Y = px(126);
 var BG_TIME_TEXT_WIDTH = px(200);
-var BG_TIME_TEXT_ALIGN_H = hmUI.align.LEFT;
+var BG_TIME_TEXT_ALIGN_H = align.LEFT;
 
 var SCROLL_ITEM_HEIGHT = px(90);
 var COMMON_BUTTON_PADDING = 0;
@@ -31,7 +32,7 @@ if (DEVICE_WIDTH < 340){
     TEXT_HEIGHT = px(36);
     BG_TIME_TEXT_X = (DEVICE_WIDTH - BG_TIME_TEXT_WIDTH) / 2;
     BG_TIME_TEXT_Y = px(280);
-    BG_TIME_TEXT_ALIGN_H = hmUI.align.CENTER_H;
+    BG_TIME_TEXT_ALIGN_H = align.CENTER_H;
     RADIO_ON = "radio_on_tiny.png";
     RADIO_OFF = "radio_off_tiny.png";
     SCROLL_ITEM_HEIGHT = px(70);
@@ -59,9 +60,9 @@ export const DEBUG_TEXT = {
   char_space: 0,
   color: Colors.white,
   text: "",
-  text_style: hmUI.text_style.NONE,
-  align_h: hmUI.align.LEFT,
-  align_v: hmUI.align.TOP,
+  text_style: text_style.NONE,
+  align_h: align.LEFT,
+  align_v: align.TOP,
 };
 
 export const TITLE_TEXT = {
@@ -71,9 +72,9 @@ export const TITLE_TEXT = {
   h: TEXT_HEIGHT,
   color: Colors.white,
   text_size: TEXT_SIZE,
-  align_h: hmUI.align.CENTER_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
+  align_h: align.CENTER_H,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 }
 
 export const MESSAGE_TEXT = {
@@ -83,10 +84,9 @@ export const MESSAGE_TEXT = {
   h: px(140) ,
   color: Colors.white,
   text_size: MESSAGE_TEXT_SIZE,
-  align_h: hmUI.align.CENTER_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
-//  text_style: hmUI.text_style.WRAP, //allows to wrap long text
+  align_h: align.CENTER_H,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 }
 
 export const COMMON_BUTTON_STYLES = {
@@ -130,9 +130,9 @@ export const VERSION_TEXT = {
   h: px(28),
   color: Colors.white,
   text_size: px(25),
-  align_h: hmUI.align.CENTER_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
+  align_h: align.CENTER_H,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 }
 
 export const BG_VALUE_TEXT = {
@@ -142,9 +142,9 @@ export const BG_VALUE_TEXT = {
   h: px(85),
   color: Colors.white,
   text_size: px(75),
-  align_h: hmUI.align.CENTER_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
+  align_h: align.CENTER_H,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 };
 
 export const BG_TIME_TEXT = {
@@ -155,8 +155,8 @@ export const BG_TIME_TEXT = {
   color: Colors.white,
   text_size: px(25),
   align_h: BG_TIME_TEXT_ALIGN_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 };
 
 export const BG_DELTA_TEXT = {
@@ -166,9 +166,9 @@ export const BG_DELTA_TEXT = {
   h: TEXT_HEIGHT,
   color: Colors.white,
   text_size: TEXT_SIZE,
-  align_h: hmUI.align.CENTER_H,
-  align_v: hmUI.align.CENTER_V,
-  text_style: hmUI.text_style.NONE,
+  align_h: align.CENTER_H,
+  align_v: align.CENTER_V,
+  text_style: text_style.NONE,
 };
 
 export const BG_TREND_IMAGE = {
@@ -197,8 +197,6 @@ export const IMG_LOADING_PROGRESS = {
   center_y: 20,
   visible: false,
 };
-
-
 
 export const CONFIG_PAGE_SCROLL_ITEM_CONFIG = [
   {
@@ -240,4 +238,3 @@ export const CONFIG_PAGE_SCROLL = {
   item_config: CONFIG_PAGE_SCROLL_ITEM_CONFIG,
   item_config_count: CONFIG_PAGE_SCROLL_ITEM_CONFIG.length,
 }
-

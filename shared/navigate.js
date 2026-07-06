@@ -1,3 +1,5 @@
+import { push, launchApp } from '@zos/router'
+
 /*
 * will open the app
 * @appid  if  defined will open the app with id
@@ -16,16 +18,20 @@ export function gotoSubpage(page, params, appid) {
         page = r[1]
     }
 
-    let obj = {
-        url: url,
-        param: JSON.stringify({
-            page, ...params
-        })
+    const queryParams = {
+        page, ...params
     }
+
     if (appid) {
-        obj = {...obj, ...{appid: appid}}
-        hmApp.startApp(obj)
+        launchApp({
+            appId: appid,
+            url: url,
+            params: queryParams
+        })
     } else {
-        hmApp.gotoPage(obj);
+        push({
+            url: url,
+            params: JSON.stringify(queryParams)
+        })
     }
 }
