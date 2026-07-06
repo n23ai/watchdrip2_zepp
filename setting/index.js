@@ -3,6 +3,7 @@ import { gettext } from 'i18n'
 AppSettingsPage({
   state: {
     network_logging: false,
+    server_url: 'http://localhost:29863/',
     webhook_url: 'http://127.0.0.1:29863/save_logs',
     page: 'main', // 'main' or 'logs'
     recentLogs: ''
@@ -26,6 +27,10 @@ AppSettingsPage({
     if (url) {
       this.state.webhook_url = url
     }
+    const serverUrl = props.settingsStorage.getItem('server_url')
+    if (serverUrl) {
+      this.state.server_url = serverUrl
+    }
     const logs = props.settingsStorage.getItem('recent_logs')
     this.state.recentLogs = logs || 'Нет логов / No logs'
     
@@ -39,6 +44,21 @@ AppSettingsPage({
     return View(
       { style: { padding: '10px' } },
       [
+        Section(
+          { title: 'Источник данных / Data Source' },
+          [
+            TextInput({
+              label: 'WatchDrip/xDrip URL',
+              settingsKey: 'server_url',
+              value: this.state.server_url,
+              subStyle: { color: '#333', fontSize: '14px' },
+              onChange: (val) => {
+                this.state.server_url = val
+                props.settingsStorage.setItem('server_url', val)
+              }
+            })
+          ]
+        ),
         Section(
           { title: 'Логирование сети / Network Logging' },
           [

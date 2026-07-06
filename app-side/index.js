@@ -1,5 +1,5 @@
 import {MessageBuilder} from "../shared/message";
-import {Commands, SERVER_INFO_URL, SERVER_URL,} from "../utils/config/constants";
+import {Commands, SERVER_INFO_URL, SERVER_PUT_TREATMENTS_URL, SERVER_URL,} from "../utils/config/constants";
 
 // const logger = DeviceRuntimeCore.HmLogger.getLogger("watchdrip_side");
 const messageBuilder = new MessageBuilder();
@@ -34,9 +34,26 @@ const addLog = (type, message) => {
     } catch (e) {}
 };
 
+const getSettingsStorage = () => {
+    try {
+        if (typeof settings !== 'undefined' && settings.settingsStorage) {
+            return settings.settingsStorage;
+        }
+    } catch (e) {}
+    return null;
+};
+
+const getServerUrl = () => {
+    const storage = getSettingsStorage();
+    let url = storage && storage.getItem('server_url');
+    if (!url) {
+        url = SERVER_URL;
+    }
+    return url.endsWith('/') ? url : url + '/';
+};
+
 // Функция для получения информации с сервера с таймаутом
-const fetchInfo = async (ctx, url) => {
-    let resp = {};
+const requestInfo = async (url) => {
     addLog("WATCH_REQ", `GET_INFO requested for url: ${url}`);
     addLog("FETCH_REQ", `Sending GET to ${url}`);
 
@@ -49,7 +66,7 @@ const fetchInfo = async (ctx, url) => {
         setTimeout(() => reject(new Error("Request timed out after 5 seconds")), 5000);
     });
 
-    await Promise.race([fetchPromise, timeoutPromise])
+    return Promise.race([fetchPromise, timeoutPromise])
         .then((response) => {
             if (!response.body) throw Error('No Data');
             return response.body;
@@ -58,7 +75,7 @@ const fetchInfo = async (ctx, url) => {
             try {
                 addLog("FETCH_RES", `Success. Response length: ${JSON.stringify(data).length}`);
                 console.log("log", data);
-                resp = data;
+                return data;
             } catch (error) {
                 throw Error(error.message);
             }
@@ -66,21 +83,22 @@ const fetchInfo = async (ctx, url) => {
         .catch(function (error) {
             addLog("FETCH_ERR", `Error: ${error.message || error}`);
             console.log("fetchInfo error", error);
-            resp = {error: true, message: error.message};
-        })
-        .finally(() => {
-            const jsonResp = {data: {result: resp}};
-            if (ctx !== false) {
-                ctx.response(jsonResp);
-            } else {
-                return jsonResp;
-            }
+            return {error: true, message: error.message};
         });
+};
+
+const fetchInfo = async (ctx, url) => {
+    const resp = await requestInfo(url);
+    const jsonResp = {data: {result: resp}};
+    if (ctx && typeof ctx.response === 'function') {
+        ctx.response(jsonResp);
+    }
+    return jsonResp;
 };
 
 const sendToWatch = async () => {
     console.log("log", "sendToWatch");
-    const result = await fetchInfo();
+    const result = await fetchInfo(false, getServerUrl() + SERVER_INFO_URL);
     messageBuilder.call(result);
 };
 
@@ -145,7 +163,7 @@ AppSideService({
         messageBuilder.on("request", (ctx) => {
             const jsonRpc = messageBuilder.buf2Json(ctx.request.payload);
             const {params = {}} = jsonRpc;
-            let url = SERVER_URL;
+            let url = getServerUrl();
             switch (jsonRpc.method) {
                 case Commands.getInfo:
                     return fetchInfo(ctx, url + SERVER_INFO_URL + "?" + params);

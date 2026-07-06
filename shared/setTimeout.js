@@ -1,6 +1,6 @@
-import * as timer from "@zos/timer";
 import { getGlobal } from "./global";
 
+const timer = require("@zos/timer");
 let globalNS = getGlobal();
 
 if (typeof setTimeout === "undefined") {
@@ -57,4 +57,3 @@ if (typeof setTimeout === "undefined") {
     return timer1;
   };
 }
-

@@ -12,22 +12,34 @@ export class WatchdripConfig {
     constructor() {
         file = new Path("full", WF_CONFIG_FILE);
 
-        this.alarmSettings = WATCHDRIP_ALARM_SETTINGS_DEFAULTS;
-        this.settings = WATCHDRIP_SETTINGS_DEFAULTS;
+        this.alarmSettings = {...WATCHDRIP_ALARM_SETTINGS_DEFAULTS};
+        this.settings = {...WATCHDRIP_SETTINGS_DEFAULTS};
         this.settingsTime = 0;
         this.infoLastUpd= 0;
         this.infoLastUpdAttempt = 0;
         this.infoLastUpdSucess = false
+        this.configVersion = 2;
+        this.backgroundDebug = {};
 
         this.alarm_id = '-1';
+        this.service_alarm_id = '-1';
         this.read();
     }
 
     read() {
         let parsed = file.fetchJSON();
         if (parsed) {
-            parsed.watchdripConfig = {...WATCHDRIP_SETTINGS_DEFAULTS, ...parsed.watchdripConfig};
-            parsed.watchdripAlarmConfig = {...WATCHDRIP_ALARM_SETTINGS_DEFAULTS, ...parsed.watchdripAlarmConfig};
+            const parsedConfigVersion = parsed.configVersion || 1;
+            parsed.settings = {...WATCHDRIP_SETTINGS_DEFAULTS, ...parsed.settings};
+            if (parsedConfigVersion < 2) {
+                parsed.settings.useAppFetch = true;
+            }
+            parsed.alarmSettings = {...WATCHDRIP_ALARM_SETTINGS_DEFAULTS, ...parsed.alarmSettings};
+            parsed.alarmSettings.fetchInterval = Math.min(
+                parsed.alarmSettings.fetchInterval || WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchInterval,
+                WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchInterval
+            );
+            parsed.configVersion = 2;
             Object.assign(this, parsed);
         }
     }

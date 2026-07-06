@@ -10,7 +10,7 @@ export const WATCHDRIP_APP_ID = "43107";
 export const WATCHDRIP_SETTINGS_DEFAULTS = {
     disableUpdates: false,
     showLog: true,
-    useAppFetch: false,
+    useAppFetch: true,
 };
 
 export const WATCHDRIP_ALARM_SETTINGS_DEFAULTS = {

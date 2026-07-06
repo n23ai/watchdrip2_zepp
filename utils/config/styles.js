@@ -117,6 +117,13 @@ export const COMMON_BUTTON_SETTINGS = {
   text: getText("settings"),
 };
 
+export const COMMON_BUTTON_START_BACKGROUND = {
+  ...COMMON_BUTTON_STYLES,
+  y: DEVICE_HEIGHT - px(190),
+  text: getText("start_background_service"),
+  text_size: px(28),
+};
+
 export const COMMON_BUTTON_ADD_TREATMENT = {
   ...COMMON_BUTTON_STYLES,
   y: DEVICE_HEIGHT - px(0),

@@ -1,6 +1,7 @@
 import {json2str, str2json} from "../shared/data";
 import {DebugText} from "../shared/debug";
 import {getGlobal} from "../shared/global";
+import { MessageBuilder } from "../shared/message";
 import { getText } from "@zos/i18n";
 import {
     Colors,
@@ -24,6 +25,7 @@ import {
     BG_VALUE_TEXT,
     COMMON_BUTTON_ADD_TREATMENT,
     COMMON_BUTTON_SETTINGS,
+    COMMON_BUTTON_START_BACKGROUND,
     CONFIG_PAGE_SCROLL,
     DEVICE_TYPE,
     IMG_LOADING_PROGRESS,
@@ -39,22 +41,92 @@ import {WatchdripData} from "../utils/watchdrip/watchdrip-data";
 import {getDataTypeConfig, img} from "../utils/helper";
 import {gotoSubpage} from "../shared/navigate";
 import {WatchdripConfig} from "../utils/watchdrip/config";
+import {scheduleBackgroundFetchAlarm} from "../utils/watchdrip/background-alarm";
+import {getBackgroundDebugText} from "../utils/watchdrip/background-debug";
 import {Path} from "../utils/path";
+import {DEVICE_WIDTH} from "../utils/config/device";
 
-import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle } from '@zos/ui'
+import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
 import { Time, Vibrator } from '@zos/sensor'
-import { getPackageInfo } from '@zos/app'
+import { getPackageInfo, queryPermission, requestPermission } from '@zos/app'
+import { start as startAppService } from '@zos/app-service'
 import { goBack, home, setLaunchAppTimeout, clearLaunchAppTimeout } from '@zos/router'
-import { log } from '@zos/utils'
+import { log, px } from '@zos/utils'
 import { setPageBrightTime, resetPageBrightTime, setWakeUpRelaunch } from '@zos/display'
 import { getSystemInfo } from '@zos/device'
 
 const logger = log.getLogger("watchdrip_app");
+const ENABLE_TREATMENT_UI = false;
+const BG_SERVICE_PERMISSION = 'device:os.bg_service';
 
 const {appId} = getPackageInfo();
+const ble = require('@zos/ble');
 
 var debug = null;
 var watchdrip = null;
+
+function savePageBackgroundDebug(stage, fields = {}) {
+    if (!(watchdrip && watchdrip.conf)) {
+        return;
+    }
+    watchdrip.conf.backgroundDebug = {
+        stage,
+        at: watchdrip.timeSensor.getTime(),
+        count: ((watchdrip.conf.backgroundDebug && watchdrip.conf.backgroundDebug.count) || 0) + 1,
+        ...fields,
+    };
+    watchdrip.conf.save();
+    watchdrip.updateServiceDebugWidget();
+}
+
+function startWatchdripServiceFromPage(source = 'auto') {
+    try {
+        const permissionState = queryPermission({permissions: [BG_SERVICE_PERMISSION]});
+        console.log("watchdrip page bg_service permission state: " + JSON.stringify(permissionState));
+        savePageBackgroundDebug(source + '_permission_state', {result: JSON.stringify(permissionState)});
+
+        if (permissionState && permissionState[0] === 2) {
+            startWatchdripServiceNow(source);
+            return;
+        }
+
+        const requestResult = requestPermission({
+            permissions: [BG_SERVICE_PERMISSION],
+            callback: (result) => {
+                console.log("watchdrip page bg_service permission request result: " + JSON.stringify(result));
+                savePageBackgroundDebug(source + '_permission_request', {result: JSON.stringify(result)});
+                if (result && result[0] === 2) {
+                    startWatchdripServiceNow(source);
+                }
+            }
+        });
+        console.log("watchdrip page permission request ret: " + requestResult);
+    } catch (e) {
+        console.log("watchdrip page service permission error: " + e);
+        savePageBackgroundDebug(source + '_permission_error', {error: String(e)});
+    }
+}
+
+function startWatchdripServiceNow(source = 'auto') {
+    try {
+        console.log("watchdrip page app_service_start_call");
+        savePageBackgroundDebug(source + '_service_start_call');
+        const ret = startAppService({
+            file: 'app-service/index',
+            param: 'source=' + source + '&manual=' + (source === 'manual' ? '1' : '0'),
+            complete_func: (info) => {
+                const result = info ? info.result : 'no-info';
+                console.log("watchdrip page app-service start result: " + result);
+                savePageBackgroundDebug(source + '_service_start_cb', {result: String(result)});
+            }
+        });
+        console.log("watchdrip page app_service_start_ret: " + ret);
+        savePageBackgroundDebug(source + '_service_start_ret', {result: String(ret)});
+    } catch (e) {
+        console.log("watchdrip page app-service start error: " + e);
+        savePageBackgroundDebug(source + '_service_start_error', {error: String(e)});
+    }
+}
 
 const GoBackType = {NONE: 'none', GO_BACK: 'go_back', HIDE_PAGE: 'hide_page', HIDE: 'hide'};
 const PagesType = {
@@ -80,13 +152,18 @@ class Watchdrip {
         this.lastUpdateAttempt = null;
         this.lastUpdateSucessful = false;
         this.updatingData = false;
+        this.foregroundMessageBuilder = null;
+        this.foregroundFetchInFlight = false;
         this.intervalTimer = null;
+        this.progressTimer = null;
+        this.serviceDebugTextWidget = null;
         this.updateIntervals = DATA_UPDATE_INTERVAL_MS;
         this.fetchMode = FetchMode.DISPLAY;
         this.conf = new WatchdripConfig();
         debug.setEnabled(this.conf.settings.showLog);
 
         this.infoFile = new Path("full", WF_INFO_FILE);
+        this.watchdripData = new WatchdripData(this.timeSensor);
     }
 
     start(data) {
@@ -136,7 +213,8 @@ class Watchdrip {
     main_page() {
         setPageBrightTime({ brightTime: 60000 });
         setWakeUpRelaunch(true);
-        this.watchdripData = new WatchdripData(this.timeSensor);
+        this.prepareNextAlarm();
+        scheduleBackgroundFetchAlarm('page');
         let pkg = getPackageInfo();
         this.versionTextWidget = createWidget(widget.TEXT, {...VERSION_TEXT, text: "v" + pkg.version});
         this.messageTextWidget = createWidget(widget.TEXT, {...MESSAGE_TEXT, text: ""});
@@ -146,6 +224,18 @@ class Watchdrip {
         this.bgTrendImageWidget = createWidget(widget.IMG, BG_TREND_IMAGE);
         this.bgStaleLine = createWidget(widget.FILL_RECT, BG_STALE_RECT);
         this.bgStaleLine.setProperty(prop.VISIBLE, false);
+        this.serviceDebugTextWidget = createWidget(widget.TEXT, {
+            x: px(30),
+            y: px(285),
+            w: DEVICE_WIDTH - px(60),
+            h: px(28),
+            color: 0x999999,
+            text_size: px(18),
+            align_h: align.CENTER_H,
+            align_v: align.CENTER_V,
+            text_style: text_style.NONE,
+            text: getBackgroundDebugText(this.conf, this.timeSensor),
+        });
 
         if (this.conf.settings.disableUpdates) {
             this.showMessage(getText("data_upd_disabled"));
@@ -153,7 +243,8 @@ class Watchdrip {
             if (this.readInfo()) {
                 this.updateWidgets();
             }
-            this.fetchInfo();
+            this.readLocalInfo();
+            this.fetchRemoteInfo();
             this.startDataUpdates();
         }
 
@@ -165,11 +256,34 @@ class Watchdrip {
         });
 
         createWidget(widget.BUTTON, {
-            ...COMMON_BUTTON_ADD_TREATMENT,
+            ...COMMON_BUTTON_START_BACKGROUND,
             click_func: (button_widget) => {
-                gotoSubpage(PagesType.ADD_TREATMENT);
+                this.startBackgroundServiceManual();
             },
         });
+
+        if (ENABLE_TREATMENT_UI) {
+            createWidget(widget.BUTTON, {
+                ...COMMON_BUTTON_ADD_TREATMENT,
+                click_func: (button_widget) => {
+                    gotoSubpage(PagesType.ADD_TREATMENT);
+                },
+            });
+        }
+    }
+
+    startBackgroundServiceManual() {
+        debug.log("manual background service start");
+        try {
+            this.vibrateNow();
+            savePageBackgroundDebug('manual_button_pressed');
+            const alarmId = scheduleBackgroundFetchAlarm('manual_button');
+            savePageBackgroundDebug('manual_alarm_scheduled', {alarmId});
+            startWatchdripServiceFromPage('manual');
+        } catch (e) {
+            debug.log("manual background start error: " + e);
+            savePageBackgroundDebug('manual_start_error', {error: String(e)});
+        }
     }
 
     getConfigData() {
@@ -259,7 +373,7 @@ class Watchdrip {
             fetch = true;
         }
         if (fetch) {
-            this.fetchInfo();
+            this.fetchRemoteInfo();
         }
     }
 
@@ -282,7 +396,7 @@ class Watchdrip {
                 }
                 if (this.isTimeout(lastInfoUpdate, this.updateIntervals)) {
                     debug.log("reached updateIntervals");
-                    this.fetchInfo();
+                    this.fetchRemoteInfo();
                     return;
                 }
                 const bgTimeOlder = this.isTimeout(this.watchdripData.getBg().time, XDRIP_UPDATE_INTERVAL_MS);
@@ -293,7 +407,7 @@ class Watchdrip {
                         return;
                     }
                     debug.log("data older than sensor update interval");
-                    this.fetchInfo();
+                    this.fetchRemoteInfo();
                     return;
                 }
                 debug.log("data not modified");
@@ -314,29 +428,45 @@ class Watchdrip {
         setPageBrightTime({ brightTime: 999000 });
         this.progressWidget = createWidget(widget.IMG, IMG_LOADING_PROGRESS);
         this.progressAngle = 0;
-        this.stopLoader();
         this.fetchMode = FetchMode.HIDDEN;
-        this.fetchMode = FetchMode.HIDDEN;
-        this.handleGoBack();
+        this.startLoader();
+        this.fetchRemoteInfo({
+            updateUI: false,
+            onDone: () => {
+                this.stopLoader();
+                this.handleGoBack();
+            }
+        });
     }
 
     fetch_page_local() {
-        debug.log("fetch_page");
+        debug.log("fetch_page_local");
         setStatusBarVisible(false);
+        this.prepareNextAlarm();
+        if (this.conf.settings.disableUpdates || !this.conf.settings.useAppFetch) {
+            this.handleGoBack();
+            return;
+        }
+        setPageBrightTime({ brightTime: 999000 });
         this.progressWidget = createWidget(widget.IMG, IMG_LOADING_PROGRESS);
         this.progressAngle = 0;
-        this.stopLoader();
         this.fetchMode = FetchMode.HIDDEN;
-        this.fetchMode = FetchMode.HIDDEN;
-        this.handleGoBack();
+        this.startLoader();
+        this.fetchRemoteInfo({
+            updateUI: false,
+            onDone: () => {
+                this.stopLoader();
+                this.handleGoBack();
+            }
+        });
     }
 
     hide_page() {
         home();
     }
 
-    fetchInfo(params = '') {
-        debug.log("fetchInfo local only");
+    readLocalInfo(params = '') {
+        debug.log("readLocalInfo");
         if (this.fetchMode === FetchMode.DISPLAY) {
             this.showMessage(getText("connecting"));
         }
@@ -357,7 +487,97 @@ class Watchdrip {
         }
     }
 
+    getForegroundMessageBuilder() {
+        if (!this.foregroundMessageBuilder) {
+            this.foregroundMessageBuilder = new MessageBuilder({ appId, ble });
+            this.foregroundMessageBuilder.connect();
+        }
+        return this.foregroundMessageBuilder;
+    }
+
+    fetchRemoteInfo(options = {}) {
+        const updateUI = options.updateUI !== false;
+        const onDone = typeof options.onDone === "function" ? options.onDone : null;
+        const finish = () => {
+            if (onDone) {
+                onDone();
+            }
+        };
+
+        if (this.foregroundFetchInFlight) {
+            debug.log("fetchRemoteInfo already running");
+            finish();
+            return;
+        }
+        debug.log("fetchRemoteInfo");
+        this.foregroundFetchInFlight = true;
+        this.updatingData = true;
+        this.lastUpdateAttempt = this.timeSensor.getTime();
+        this.conf.infoLastUpdAttempt = this.lastUpdateAttempt;
+        this.conf.infoLastUpdSucess = false;
+        this.conf.save();
+
+        let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams;
+        if (this.conf.alarmSettings && this.conf.alarmSettings.fetchParams) {
+            fetchParams = this.conf.alarmSettings.fetchParams;
+        }
+
+        try {
+            this.getForegroundMessageBuilder().requestCb({
+                method: Commands.getInfo,
+                params: fetchParams,
+            }, {timeout: 5000}, (error, data) => {
+                this.foregroundFetchInFlight = false;
+                this.updatingData = false;
+                if (error) {
+                    debug.log("fetchRemoteInfo error: " + error);
+                    this.lastUpdateSucessful = false;
+                    this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+                    this.conf.infoLastUpdSucess = false;
+                    this.conf.save();
+                    finish();
+                    return;
+                }
+
+                let {result: info = {}} = data;
+                if (info && !info.error) {
+                    const updateTime = this.saveInfo(info);
+                    this.lastInfoUpdate = updateTime;
+                    this.lastUpdateSucessful = true;
+                    this.conf.infoLastUpdAttempt = updateTime;
+                    this.conf.infoLastUpd = updateTime;
+                    this.conf.infoLastUpdSucess = true;
+                    this.conf.save();
+                    if (updateUI) {
+                        this.readInfo();
+                        this.updateWidgets();
+                    }
+                    debug.log("fetchRemoteInfo success");
+                } else {
+                    debug.log("fetchRemoteInfo bad result: " + JSON.stringify(info));
+                    this.lastUpdateSucessful = false;
+                    this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+                    this.conf.infoLastUpdSucess = false;
+                    this.conf.save();
+                }
+                finish();
+            });
+        } catch (e) {
+            this.foregroundFetchInFlight = false;
+            this.updatingData = false;
+            this.lastUpdateSucessful = false;
+            this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+            this.conf.infoLastUpdSucess = false;
+            this.conf.save();
+            debug.log("fetchRemoteInfo exception: " + e);
+            finish();
+        }
+    }
+
     startLoader() {
+        if (!this.progressWidget) {
+            return;
+        }
         this.progressWidget.setProperty(prop.VISIBLE, true);
         this.progressWidget.setProperty(prop.MORE, {angle: this.progressAngle});
         this.progressTimer = this.globalNS.setInterval(() => {
@@ -376,15 +596,29 @@ class Watchdrip {
             this.globalNS.clearInterval(this.progressTimer);
             this.progressTimer = null;
         }
+        if (!this.progressWidget) {
+            return;
+        }
         this.progressWidget.setProperty(prop.VISIBLE, false);
     }
 
     updateWidgets() {
         debug.log('updateWidgets');
+        this.updateServiceDebugWidget();
         this.setMessageVisibility(false);
         this.setBgElementsVisibility(true);
         this.updateValuesWidget()
         this.updateTimesWidget()
+    }
+
+    updateServiceDebugWidget() {
+        if (!this.serviceDebugTextWidget) {
+            return;
+        }
+        this.conf.read();
+        this.serviceDebugTextWidget.setProperty(prop.MORE, {
+            text: getBackgroundDebugText(this.conf, this.timeSensor),
+        });
     }
 
     updateValuesWidget() {
@@ -481,11 +715,16 @@ class Watchdrip {
 
     saveInfo(info) {
         debug.log("saveInfo");
-        this.infoFile.overrideWithText(info);
+        if (typeof info === 'string') {
+            this.infoFile.overrideWithText(info);
+        } else {
+            this.infoFile.overrideWithJSON(info);
+        }
         this.lastUpdateSucessful = true;
         let time = this.timeSensor.getTime();
         this.conf.infoLastUpd = time
         this.conf.infoLastUpdSucess = this.lastUpdateSucessful;
+        this.conf.save();
         return time;
     }
 
@@ -517,7 +756,7 @@ class Watchdrip {
             this.system_alarm_id = setLaunchAppTimeout({
                 appId: appId,
                 url: "page/index",
-                params: PagesType.UPDATE_LOCAL,
+                params: json2str({ page: PagesType.UPDATE_LOCAL }),
                 delay: this.conf.alarmSettings.fetchInterval * 1000,
             });
             this.saveAlarmId(this.system_alarm_id);
@@ -549,6 +788,10 @@ class Watchdrip {
     onDestroy() {
         this.conf.save();
         this.stopDataUpdates();
+        if (this.foregroundMessageBuilder) {
+            this.foregroundMessageBuilder.disConnect();
+            this.foregroundMessageBuilder = null;
+        }
         this.vibrate.stop();
         resetPageBrightTime();
     }
@@ -564,7 +807,7 @@ Page({
         try {
             debug = new DebugText();
             debug.setLines(20);
-            console.log("page build widgets");
+            logger.log("page build widgets");
             let data = {page: PagesType.MAIN};
             try {
                 if (!(!this.p || this.p === 'undefined')) {
@@ -577,7 +820,7 @@ Page({
             watchdrip = new Watchdrip()
             watchdrip.start(data);
         } catch (e) {
-            console.log('LifeCycle Error ' + e)
+            logger.error('LifeCycle Error ' + e)
             if (debug) {
                 debug.log('LifeCycle Error ' + e)
                 e && e.stack && e.stack.split(/\n/).forEach((i) => debug.log('error stack:' + i))

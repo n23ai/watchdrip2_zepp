@@ -874,16 +874,18 @@ export class MessageBuilder extends EventBus {
       this.on('response', transact)
       this.sendJson({ requestId, json: data, type: MessagePayloadType.Request })
 
-      timer1 = setTimeout(() => {
-        timer1 = null
-        if (hasReturned) {
-          return
-        }
+      if (opts.timeout > 0) {
+        timer1 = setTimeout(() => {
+          timer1 = null
+          if (hasReturned) {
+            return
+          }
 
-        // logger.error(`request time out in ${opts.timeout}ms error=>%d data=>%j`, requestId, data)
-        this.off('response', transact)
-        cb(Error(`Timed out in ${opts.timeout}ms.`))
-      }, opts.timeout)
+          // logger.error(`request time out in ${opts.timeout}ms error=>%d data=>%j`, requestId, data)
+          this.off('response', transact)
+          cb(Error(`Timed out in ${opts.timeout}ms.`))
+        }, opts.timeout)
+      }
     }
 
     return this.waitingShakePromise.then(_requestCb)

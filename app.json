@@ -119,6 +119,18 @@
       },
       "platforms": [
         {
+          "name": "bip6_1",
+          "deviceSource": 9765120
+        },
+        {
+          "name": "bip6_2",
+          "deviceSource": 9765121
+        },
+        {
+          "name": "bip6_3",
+          "deviceSource": 10158337
+        },
+        {
           "name": "balance_1",
           "deviceSource": 8519936
         },
@@ -145,18 +157,6 @@
         {
           "name": "MunichWN3S",
           "deviceSource": 9978113
-        },
-        {
-          "name": "bip6_1",
-          "deviceSource": 9765120
-        },
-        {
-          "name": "bip6_2",
-          "deviceSource": 9765121
-        },
-        {
-          "name": "bip6_3",
-          "deviceSource": 10158337
         },
         {
           "name": "active_max_1",

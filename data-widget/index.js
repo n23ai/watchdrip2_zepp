@@ -3,13 +3,83 @@ import { Path } from '../utils/path'
 import { WatchdripData } from '../utils/watchdrip/watchdrip-data'
 import { WF_INFO_FILE } from '../utils/config/global-constants'
 import { Colors } from '../utils/config/constants'
+import { scheduleBackgroundFetchAlarm } from '../utils/watchdrip/background-alarm'
+import { WatchdripConfig } from '../utils/watchdrip/config'
+import { getBackgroundDebugText, markBackgroundDebug } from '../utils/watchdrip/background-debug'
 import { createWidget, widget, prop, align, text_style } from '@zos/ui'
-import { px } from '@zos/utils'
+import { px, log } from '@zos/utils'
 import { getDeviceInfo } from '@zos/device'
 import { start as startAppService } from '@zos/app-service'
+import { queryPermission, requestPermission } from '@zos/app'
 const { width: DEVICE_WIDTH, height: DEVICE_HEIGHT } = getDeviceInfo()
 const centerX = DEVICE_WIDTH / 2
 const topOffset = DEVICE_HEIGHT > 400 ? px(68) : px(60)
+const logger = log.getLogger('watchdrip_widget')
+const BG_SERVICE_PERMISSION = 'device:os.bg_service'
+
+const getCardContentMetrics = () => {
+  const contentWidth = Math.min(px(380), DEVICE_WIDTH - px(80))
+  return {
+    contentWidth,
+    contentX: (DEVICE_WIDTH - contentWidth) / 2,
+  }
+}
+
+const startWatchdripService = () => {
+  if (typeof startAppService !== 'function') {
+    logger.warn("data-widget startAppService is not available")
+    markBackgroundDebug('widget_service_unavailable')
+    return
+  }
+
+  const result = startAppService({
+    file: 'app-service/index',
+    complete_func: (info) => {
+      const cbResult = info ? info.result : 'no-info'
+      logger.log("data-widget app-service start result: " + cbResult)
+      markBackgroundDebug('widget_service_start_cb', { result: String(cbResult) })
+    }
+  })
+  markBackgroundDebug('widget_service_start_ret', { result: String(result) })
+}
+
+const startWatchdripServiceWithPermission = () => {
+  try {
+    const permissionState = queryPermission({ permissions: [BG_SERVICE_PERMISSION] })
+    logger.log("data-widget bg_service permission state: " + JSON.stringify(permissionState))
+    markBackgroundDebug('widget_permission_state', { result: JSON.stringify(permissionState) })
+    if (permissionState && permissionState[0] === 2) {
+      startWatchdripService()
+      return
+    }
+
+    requestPermission({
+      permissions: [BG_SERVICE_PERMISSION],
+      callback: (result) => {
+        logger.log("data-widget bg_service permission request result: " + JSON.stringify(result))
+        markBackgroundDebug('widget_permission_request', { result: JSON.stringify(result) })
+        if (result && result[0] === 2) {
+          startWatchdripService()
+        }
+      }
+    })
+  } catch (e) {
+    logger.error('data-widget permission error: ' + e)
+    markBackgroundDebug('widget_permission_error', { error: String(e) })
+    startWatchdripService()
+  }
+}
+
+const scheduleWatchdripServiceAlarm = () => {
+  try {
+    const alarmId = scheduleBackgroundFetchAlarm('widget')
+    logger.log('data-widget service alarm id: ' + alarmId)
+    markBackgroundDebug('widget_alarm_scheduled', { alarmId })
+  } catch (e) {
+    logger.error('data-widget schedule alarm error: ' + e)
+    markBackgroundDebug('widget_alarm_error', { error: String(e) })
+  }
+}
 
 DataWidget({
   state: {
@@ -22,39 +92,32 @@ DataWidget({
     bgValTextWidget: null,
     bgTrendImageWidget: null,
     bgSubtitleWidget: null,
+    debugTextWidget: null,
     barPointerWidget: null,
   },
 
   onInit() {
-    console.log('Workout widget: onInit')
+    logger.log('widget onInit')
     try {
       this.state.timeSensor = new Time()
       this.state.watchdripData = new WatchdripData(this.state.timeSensor)
       this.state.infoFile = new Path("full", WF_INFO_FILE)
-
-      if (typeof startAppService === 'function') {
-        startAppService({ 
-          file: 'app-service/index',
-          complete_func: (info) => {
-            console.log("data-widget app-service start result: " + info.result);
-          }
-        })
-      } else {
-        console.log("data-widget startAppService is not available")
-      }
+      scheduleWatchdripServiceAlarm()
+      startWatchdripServiceWithPermission()
+      markBackgroundDebug('widget_onInit')
     } catch (e) {
-      console.log('Workout widget: onInit error', e)
+      logger.error('widget onInit error: ' + e)
+      markBackgroundDebug('widget_onInit_error', { error: String(e) })
     }
   },
 
   build() {
-    console.log('Workout widget: build')
+    logger.log('widget build')
     try {
       // The Shortcut Card container is centered on the device screen.
       // We center our content relative to the entire screen width to ensure it perfectly aligns inside the card.
-      const contentWidth = px(340) // Safe width that fits inside the rounded card
-      const contentX = (DEVICE_WIDTH - contentWidth) / 2
-      const barY = px(130)
+      const { contentWidth, contentX } = getCardContentMetrics()
+      const barY = px(138)
       const BAR_TOTAL_W = contentWidth
       
       // Title
@@ -113,7 +176,7 @@ DataWidget({
       })
 
       // Progress bar zones
-      const BAR_H = px(8)
+      const BAR_H = px(16)
       const W_LOW = Math.floor(BAR_TOTAL_W * (2/18))
       const W_NORM = Math.floor(BAR_TOTAL_W * (6/18))
       const W_HIGH = Math.floor(BAR_TOTAL_W * (5/18))
@@ -165,58 +228,89 @@ DataWidget({
       // Pointer (White vertical line)
       this.state.barPointerWidget = createWidget(widget.FILL_RECT, {
         x: contentX,
-        y: barY - px(4),
-        w: px(4),
-        h: px(16),
+        y: barY - px(5),
+        w: px(5),
+        h: px(26),
         color: Colors.white,
-        radius: px(2)
+        radius: px(3)
+      })
+
+      this.state.debugTextWidget = createWidget(widget.TEXT, {
+        x: contentX,
+        y: barY + px(24),
+        w: contentWidth,
+        h: px(20),
+        color: 0x777777,
+        text_size: px(16),
+        align_h: align.CENTER_H,
+        align_v: align.CENTER_V,
+        text_style: text_style.NONE,
+        text: 'dbg: init'
       })
 
       this.updateUI()
     } catch (e) {
-      console.log('Workout widget: build error', e)
+      logger.error('widget build error: ' + e)
+      markBackgroundDebug('widget_build_error', { error: String(e) })
     }
   },
 
   onResume() {
-    console.log('Workout widget: onResume')
+    logger.log('widget onResume')
     try {
+      scheduleWatchdripServiceAlarm()
+      startWatchdripServiceWithPermission()
+      markBackgroundDebug('widget_onResume')
       this.updateUI()
+      if (this.state.updateTimer) {
+        clearInterval(this.state.updateTimer)
+        this.state.updateTimer = null
+      }
       this.state.updateTimer = setInterval(() => {
         this.updateUI()
-      }, 15000)
+      }, 5000)
     } catch (e) {
-      console.log('Workout widget: onResume error', e)
+      logger.error('widget onResume error: ' + e)
+      markBackgroundDebug('widget_onResume_error', { error: String(e) })
     }
   },
 
   onPause() {
-    console.log('Workout widget: onPause')
+    logger.log('widget onPause')
     try {
       if (this.state.updateTimer) {
         clearInterval(this.state.updateTimer)
         this.state.updateTimer = null
       }
     } catch (e) {
-      console.log('Workout widget: onPause error', e)
+      logger.error('widget onPause error: ' + e)
+      markBackgroundDebug('widget_onPause_error', { error: String(e) })
     }
   },
 
   onDestroy() {
-    console.log('Workout widget: onDestroy')
+    logger.log('widget onDestroy')
     try {
       if (this.state.updateTimer) {
         clearInterval(this.state.updateTimer)
         this.state.updateTimer = null
       }
     } catch (e) {
-      console.log('Workout widget: onDestroy error', e)
+      logger.error('widget onDestroy error: ' + e)
+      markBackgroundDebug('widget_onDestroy_error', { error: String(e) })
     }
   },
 
   updateUI() {
-    console.log('Workout widget: updateUI')
+    logger.log('widget updateUI')
     try {
+      const conf = new WatchdripConfig()
+      if (this.state.debugTextWidget) {
+        this.state.debugTextWidget.setProperty(prop.MORE, {
+          text: getBackgroundDebugText(conf, this.state.timeSensor)
+        })
+      }
+
       const data = this.state.infoFile.fetchJSON()
       if (data) {
         this.state.watchdripData.setData(data)
@@ -263,14 +357,14 @@ DataWidget({
           if (val > 20.0) val = 20.0
           
           let fraction = (val - 2.0) / 18.0
-          const BAR_TOTAL_W = px(340) // same as contentWidth
-          const contentX = (DEVICE_WIDTH - BAR_TOTAL_W) / 2
+          const { contentWidth: BAR_TOTAL_W, contentX } = getCardContentMetrics()
           let pointerX = contentX + Math.floor(BAR_TOTAL_W * fraction) - px(2)
           this.state.barPointerWidget.setProperty(prop.X, pointerX)
         }
       }
     } catch (e) {
-      console.log('Workout widget: updateUI error', e)
+      logger.error('widget updateUI error: ' + e)
+      markBackgroundDebug('widget_update_error', { error: String(e) })
     }
   }
 })

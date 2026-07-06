@@ -1,5 +1,6 @@
 import { getGlobal } from './global';
-import * as ble from '@zos/ble';
+
+const ble = require('@zos/ble');
 
 try {
   console.log("INIT BLE POLYFILL");
