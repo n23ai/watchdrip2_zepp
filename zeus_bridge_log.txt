@@ -1,6 +1,1 @@
-  - Enter 'help' to view the command.
-bridge$ connect
-[8D[8C[1000D[Kbridge$ c[9D[9C[1000D[Kbridge$ co[10D[10C[1000D[Kbridge$ con[11D[11C[1000D[Kbridge$ conn[12D[12C[1000D[Kbridge$ conne[13D[13C[1000D[Kbridge$ connec[14D[14C[1000D[Kbridge$ connect[15D[15C[1000D[Kbridge$ [36mconnect[39m[15D[15C
-bridge$ [8D[8C[ℹ] successfully connected to app-Android.
-[ℹ] [DEBUG-10:58:14 PM.399] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783367893811,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"[interrupt] processInfo list => []"}}
-[ℹ] [DEBUG-10:58:14 PM.406] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783367893810,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"interrupt"}}
+[✘] GetConnectDevServerWebSocketCode error

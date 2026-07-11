@@ -842,7 +842,24 @@ export class MessageBuilder extends EventBus {
   }
 
   requestCb(data, opts, cb) {
+    let cancelRequested = false
+    let cancelTransact = null
+    let timer1 = null
+
+    const cancel = () => {
+      cancelRequested = true
+      if (cancelTransact) {
+        this.off('response', cancelTransact)
+        cancelTransact = null
+      }
+      if (timer1) {
+        clearTimeout(timer1)
+        timer1 = null
+      }
+    }
+
     const _requestCb = () => {
+      if (cancelRequested) return
       const defaultOpts = { timeout: 60000 }
 
       if (typeof opts === 'function') {
@@ -853,7 +870,6 @@ export class MessageBuilder extends EventBus {
       }
 
       const requestId = genTraceId()
-      let timer1 = null
       let hasReturned = false
 
       const transact = ({ traceId, payload }) => {
@@ -864,6 +880,7 @@ export class MessageBuilder extends EventBus {
           // logger.debug('response id=>%d payload=>%j', requestId, resultJson)
 
           this.off('response', transact)
+          cancelTransact = null
           timer1 && clearTimeout(timer1)
           timer1 = null
           hasReturned = true
@@ -871,6 +888,7 @@ export class MessageBuilder extends EventBus {
         }
       }
 
+      cancelTransact = transact
       this.on('response', transact)
       this.sendJson({ requestId, json: data, type: MessagePayloadType.Request })
 
@@ -883,12 +901,14 @@ export class MessageBuilder extends EventBus {
 
           // logger.error(`request time out in ${opts.timeout}ms error=>%d data=>%j`, requestId, data)
           this.off('response', transact)
+          cancelTransact = null
           cb(Error(`Timed out in ${opts.timeout}ms.`))
         }, opts.timeout)
       }
     }
 
-    return this.waitingShakePromise.then(_requestCb)
+    this.waitingShakePromise.then(_requestCb)
+    return { cancel }
   }
 
   response({ requestId, data }) {

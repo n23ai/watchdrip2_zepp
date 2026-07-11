@@ -7,7 +7,7 @@ const messageBuilder = new MessageBuilder();
 // Логирование сети
 let logBuffer = [];
 const addLog = (type, message) => {
-    let networkLogging = false;
+    let networkLogging = true;
     try {
         if (typeof settings !== 'undefined' && settings.settingsStorage) {
             const flag = settings.settingsStorage.getItem('network_logging');

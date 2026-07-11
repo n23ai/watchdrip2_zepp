@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+## Core Specification & Guidelines
+You MUST read and strictly adhere to the global AI guidelines located at [specification/AGENT.md](file:///Users/nikolaj/Documents/dev/zepp/specification/AGENT.md) j,yjdbbefore making architectural decisions or modifying code. It contains critical constraints (e.g., regarding API imports, QuickJS limitations, and Zepp OS 3+ features).
+
 ## Project Structure & Module Organization
 
 This repository is a Zepp OS 3+ WatchDrip2 app. Main device entry points live at the repository root and in feature folders:
@@ -13,6 +16,20 @@ This repository is a Zepp OS 3+ WatchDrip2 app. Main device entry points live at
 - `utils/` and `shared/` contain reusable config, data, BLE, message, and filesystem helpers.
 - `assets/` contains per-device and common images.
 - `dist/`, `scratch/`, `temp_unzipped/`, and bridge logs are generated/debug artifacts; avoid committing new generated files unless needed for a release/debug handoff.
+
+## Background Execution & Architecture on Zepp OS 3+
+
+Based on extensive real-watch testing, you MUST follow this "Golden path" architecture for background updates:
+1. **Continuous App Service**: Do NOT rely on `@zos/alarm` or `setLaunchAppTimeout` to wake the app from the background. Start a Continuous App Service (`mode=continuous`) from the foreground UI (`app.js` or `page/index.js`), and do NOT call `exit()` after responses.
+2. **System Ticks**: Inside the continuous service, use `Time.onPerMinute()` to trigger cyclical background work (e.g., BLE fetches).
+3. **Read-Only Widgets**: Do NOT attempt to schedule alarms, timeouts, or perform BLE fetches from the widget context. The OS blocks wake-mechanisms initiated by widgets. Widgets must be strictly read-only, simply reading `info.json` and rendering the UI on `onResume`.
+4. **Stale Recovery / Watchdogs**: The background service must be resilient. If a BLE fetch hangs, a promise is unhandled, or a callback is missed, the service must not stay permanently locked (e.g., stuck with `fetchInFlight = true`). Implement watchdogs to clear stale state on subsequent `onPerMinute` ticks so the cycle continues.
+
+**Why alarm is prohibited here (real-watch evidence, 2026-07-11):** `@zos/alarm` invokes a single-execution App Service limited to **600 ms**. The repeating-alarm experiment produced `WATCH_REQ` and phone-side `FETCH_RES Success`, but its BLE response was sent to `devicePort=0` after the watch service had already closed. `info.json` was not refreshed and the Shortcut Card displayed `NUL`. Use continuous App Service plus `Time.onPerMinute()` for this asynchronous chain; a phone-side HTTP success is not evidence of a completed watch refresh.
+
+## File System & Data Storage Constraints
+
+- **Atomic File Updates**: When updating files atomically (e.g., writing to a temp file and renaming it), Zepp OS's `fs.renameSync(temp_path, dest_path)` **silently fails** if the `dest_path` already exists. You MUST check if the destination file exists using `fs.statSync(dest_path)` (or catch errors) and explicitly delete it using `fs.unlinkSync(dest_path)` before calling `fs.renameSync()`.
 
 ## Build, Test, and Development Commands
 
@@ -40,13 +57,13 @@ Installs the latest package on the connected real watch through the Android brid
 
 ## Coding Style & Naming Conventions
 
-Use JavaScript modules matching the existing style: two-space indentation in newer helper files, semicolons optional but keep local consistency. Prefer descriptive camelCase for functions/variables and UPPER_SNAKE_CASE for constants, for example `WATCHDRIP_APP_ID` or `scheduleBackgroundFetchAlarm`.
+Use JavaScript modules matching the existing style: two-space indentation in newer helper files, semicolons optional but keep local consistency. Prefer descriptive camelCase for functions/variables and UPPER_SNAKE_CASE for constants, for example `WATCHDRIP_APP_ID` or `fetchDataInFlight`.
 
-Keep Zepp OS API usage explicit. For `@zos/app-service` use `file: 'app-service/index'`; for `@zos/alarm` use `url`.
+Keep Zepp OS API usage explicit. For `@zos/app-service` use `file: 'app-service/index'`.
 
 ## Testing Guidelines
 
-Manual testing on a real watch is required for background behavior. After changes, run `zeus build`, install through `zeus bridge`, capture a screenshot, and inspect bridge logs for `WATCH_REQ`, `FETCH_REQ`, `FETCH_RES Success`, App Service lifecycle logs, and `processInfo list`.
+Manual testing on a real watch is required for background behavior. After changes, run `zeus build`, install through `zeus bridge`, capture a screenshot, and inspect bridge logs for `WATCH_REQ`, `FETCH_REQ`, `FETCH_RES Success`, App Service lifecycle logs, and `processInfo list`. Treat a run as successful only when the watch remains live for BLE response delivery, `info.json` save is confirmed, and the card can read the cache; `FETCH_RES Success` by itself is phone-side evidence only.
 
 ## Commit & Pull Request Guidelines
 

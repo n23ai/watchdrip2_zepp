@@ -17,7 +17,6 @@ import {
 import { getDeviceInfo } from '@zos/device'
 import { getPackageInfo } from '@zos/app'
 
-const deviceID = getDeviceInfo().deviceName;
 export const isMiBand7 = false;
 
 export class Path {
@@ -127,9 +126,17 @@ export class Path {
 
     override(buffer) {
         try {
+            const tempPath = this.relativePath + ".tmp";
             writeFileSync({
-                path: this.relativePath,
+                path: tempPath,
                 data: buffer
+            });
+            if (this.stat()) {
+                rmSync({ path: this.relativePath });
+            }
+            renameSync({
+                oldPath: tempPath,
+                newPath: this.relativePath
             });
         } catch (e) {
             console.log("override error", e);
@@ -138,13 +145,23 @@ export class Path {
 
     overrideWithText(text) {
         try {
+            const tempPath = this.relativePath + ".tmp";
             writeFileSync({
-                path: this.relativePath,
+                path: tempPath,
                 data: text,
                 options: { encoding: 'utf8' }
             });
+            if (this.stat()) {
+                rmSync({ path: this.relativePath });
+            }
+            renameSync({
+                oldPath: tempPath,
+                newPath: this.relativePath
+            });
+            return true;
         } catch (e) {
             console.log("overrideWithText error", e);
+            return false;
         }
     }
 

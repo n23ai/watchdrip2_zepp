@@ -22,7 +22,9 @@ export class WatchdripConfig {
         this.backgroundDebug = {};
 
         this.alarm_id = '-1';
+        this.page_timeout_id = '-1';
         this.service_alarm_id = '-1';
+        this.legacyAlarmCleanupVersion = 0;
         this.read();
     }
 
@@ -35,11 +37,17 @@ export class WatchdripConfig {
                 parsed.settings.useAppFetch = true;
             }
             parsed.alarmSettings = {...WATCHDRIP_ALARM_SETTINGS_DEFAULTS, ...parsed.alarmSettings};
+            if (parsed.page_timeout_id === undefined || parsed.page_timeout_id === null) {
+                parsed.page_timeout_id = '-1';
+            }
             parsed.alarmSettings.fetchInterval = Math.min(
                 parsed.alarmSettings.fetchInterval || WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchInterval,
                 WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchInterval
             );
             parsed.configVersion = 2;
+            if (parsed.legacyAlarmCleanupVersion === undefined || parsed.legacyAlarmCleanupVersion === null) {
+                parsed.legacyAlarmCleanupVersion = 0;
+            }
             Object.assign(this, parsed);
         }
     }

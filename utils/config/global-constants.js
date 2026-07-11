@@ -6,6 +6,7 @@ export const WATCHDRIP_APP_ID = "43107";
  export const WF_DIR = "/storage/js_apps/data/watchdrip";
  export const WF_INFO_FILE = WF_DIR + "/info.json";
  export const WF_CONFIG_FILE = WF_DIR + "/config.json";
+ export const WF_FOREGROUND_FILE = "watchdrip_foreground.json";
 
 export const WATCHDRIP_SETTINGS_DEFAULTS = {
     disableUpdates: false,

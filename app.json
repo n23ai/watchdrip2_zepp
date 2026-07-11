@@ -30,7 +30,7 @@
           "path": "app-side/index"
         },
         "app-service": {
-          "services": ["app-service/index"]
+          "services": ["app-service/index", "app-service/heartbeat"]
         }
       },
       "platforms": [
@@ -85,25 +85,12 @@
           "path": "app-side/index"
         },
         "app-service": {
-          "services": ["app-service/index"]
+          "services": ["app-service/index", "app-service/heartbeat"]
         },
         "setting": {
           "path": "setting/index"
         },
         "app-widget": {
-          "widgets": [
-            {
-              "path": "data-widget/index",
-              "name": "WatchDrip2 Widget",
-              "icon": "icon.png",
-              "preview": "icon.png",
-              "runtime": {
-                "type": "js"
-              }
-            }
-          ]
-        },
-        "secondary-widget": {
           "widgets": [
             {
               "path": "data-widget/index",
@@ -179,25 +166,11 @@
             "name": "WatchDrip2"
           }
         ]
-      },
-      "secondary-widget": {
-        "widgets": [
-          {
-            "name": "WatchDrip2"
-          }
-        ]
       }
     },
     "ru-RU": {
       "appName": "WatchDrip2",
       "app-widget": {
-        "widgets": [
-          {
-            "name": "WatchDrip2"
-          }
-        ]
-      },
-      "secondary-widget": {
         "widgets": [
           {
             "name": "WatchDrip2"
