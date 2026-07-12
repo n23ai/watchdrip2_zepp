@@ -74,16 +74,36 @@ export class WatchdripData {
     }
 
     isBgStale() {
-        if (this.getBg().isHasData()) {
-            return this.getBg().isStale || (this.timeSensor.getTime() - this.getBg().time - this.timeDiff) > BG_STALE_TIME_MS;
-        } else {
-            return false;
-        }
+        return this.getBgStaleReasons().length > 0;
+    }
+
+    getBgAgeMs(time = this.getBg().time) {
+        if (time == null || time === '') return null;
+        const timeInt = Number(time);
+        if (!Number.isFinite(timeInt)) return null;
+
+        const now = Number(this.timeSensor.getTime());
+        const clockDiff = Number.isFinite(this.timeDiff) ? this.timeDiff : 0;
+        if (!Number.isFinite(now)) return null;
+
+        // A future timestamp can occur briefly when phone and watch clocks
+        // move in different directions. It is still a fresh reading, not a
+        // negative age to pass to the formatter.
+        return Math.max(0, now - timeInt - clockDiff);
+    }
+
+    getBgStaleReasons() {
+        if (!this.getBg().isHasData()) return [];
+        const reasons = [];
+        if (this.getBg().isStale === true) reasons.push('server');
+        const age = this.getBgAgeMs();
+        if (age !== null && age > BG_STALE_TIME_MS) reasons.push('local');
+        return reasons;
     }
 
     getTimeAgo(time) {
-        if (time == null || 0) return "";
-        let timeInt = parseInt(time);
-        return niceTime(this.timeSensor.getTime() - timeInt - this.timeDiff);
+        const age = this.getBgAgeMs(time);
+        if (age === null) return "";
+        return niceTime(age);
     }
 }

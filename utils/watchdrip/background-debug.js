@@ -23,7 +23,7 @@ export function markBackgroundDebug(stage, fields = {}, explicitTime = 0) {
       alarmId: fields.alarmId,
       timeoutId: fields.timeoutId,
     }
-    const history = [...(previous.history || []), item].slice(-6)
+    const history = [...(previous.history || []), item].slice(-12)
     const debug = {
       stage,
       at,

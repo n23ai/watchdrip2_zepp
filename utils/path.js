@@ -23,7 +23,7 @@ export class Path {
     constructor(scope, path, appid = 0) {
         this.localFS = true;
         // Simplify for Zepp OS 3.0+
-        if (path.includes('/')) {
+        if (!path.startsWith('data://') && path.includes('/')) {
             path = path.substring(path.lastIndexOf('/') + 1);
         }
         scope = "data";
@@ -114,13 +114,18 @@ export class Path {
     }
 
     fetchJSON() {
+        return this.fetchJSONResult().data;
+    }
+
+    // UI readers need a safe reason when a snapshot is temporarily absent or
+    // incomplete while another runtime writes it.
+    fetchJSONResult() {
         const text = this.fetchText();
-        if (!text) return null;
+        if (!text) return { data: null, reason: 'missing' };
         try {
-            return JSON.parse(text);
+            return { data: JSON.parse(text), reason: '' };
         } catch (e) {
-            console.log('cannot parse json');
-            return null;
+            return { data: null, reason: 'invalid_json' };
         }
     }
 
@@ -130,20 +135,27 @@ export class Path {
                 path: this.relativePath,
                 data: buffer
             });
+            return true;
         } catch (e) {
             console.log("override error", e);
+            return false;
         }
     }
 
     overrideWithText(text) {
         try {
+            // info.json/config.json are small cache/state files. Zepp OS
+            // writeFileSync replaces an existing file, and this avoids the
+            // App Service rename race observed on the watch firmware.
             writeFileSync({
                 path: this.relativePath,
                 data: text,
                 options: { encoding: 'utf8' }
             });
+            return true;
         } catch (e) {
             console.log("overrideWithText error", e);
+            return false;
         }
     }
 

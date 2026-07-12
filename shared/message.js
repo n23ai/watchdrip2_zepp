@@ -182,8 +182,12 @@ export class MessageBuilder extends EventBus {
     this.sendMsg = this.getSafeSend()
     this.chunkSize = 2000
     this.tempBuf = null
-    this.shakeTask = Deferred()
-    this.waitingShakePromise = this.shakeTask.promise
+    this.ready = this.isSide
+    this.readyCallbacks = []
+    // Promise is not part of the Zepp OS 3 Device/App Service contract.
+    // Keep the legacy Promise path only in Side Service, where it is supported.
+    this.shakeTask = this.isSide ? Deferred() : null
+    this.waitingShakePromise = this.shakeTask ? this.shakeTask.promise : null
     this.sessionMgr = new SessionMgr()
 
     // 打开
@@ -205,6 +209,7 @@ export class MessageBuilder extends EventBus {
   }
 
   connect(cb) {
+    if (cb) this.whenReady(cb)
     this.on('message', (message) => {
       this.onMessage(message)
     })
@@ -212,12 +217,30 @@ export class MessageBuilder extends EventBus {
     this.ble &&
       this.ble.createConnect((index, data, size) => {
         // logger.warn('[RAW] [R] receive index=>%d size=>%d bin=>%s', index, size, this.bin2hex(data))
-        console.log('createConnect-------', size)
         this.onFragmentData(data)
       })
 
     this.sendShake()
-    cb && cb(this)
+  }
+
+  whenReady(cb) {
+    if (this.ready) {
+      cb && cb(this)
+      return () => {}
+    }
+    const entry = { cb, cancelled: false }
+    this.readyCallbacks.push(entry)
+    return () => { entry.cancelled = true }
+  }
+
+  markReady() {
+    if (this.ready) return
+    this.ready = true
+    const callbacks = this.readyCallbacks.slice()
+    this.readyCallbacks = []
+    callbacks.forEach((entry) => {
+      if (!entry.cancelled && entry.cb) entry.cb(this)
+    })
   }
 
   disConnect(cb) {
@@ -225,6 +248,8 @@ export class MessageBuilder extends EventBus {
     this.sendClose()
     this.off('message')
     this.ble && this.ble.disConnect()
+    this.ready = false
+    this.readyCallbacks = []
     cb && cb(this)
   }
 
@@ -239,6 +264,7 @@ export class MessageBuilder extends EventBus {
         this.onMessage(message)
       })
 
+    this.ready = true
     this.waitingShakePromise = Promise.resolve()
     cb && cb(this)
   }
@@ -728,7 +754,11 @@ export class MessageBuilder extends EventBus {
     if (data.flag === MessageFlag.App && data.type === MessageType.Shake) {
       this.appSidePort = data.port2
       // logger.debug('appSidePort=>', data.port2)
-      this.shakeTask.resolve()
+      if (this.isDevice) {
+        this.markReady()
+      } else if (this.shakeTask) {
+        this.shakeTask.resolve()
+      }
     } else if (
       data.flag === MessageFlag.App &&
       data.type === MessageType.Data &&
@@ -842,7 +872,11 @@ export class MessageBuilder extends EventBus {
   }
 
   requestCb(data, opts, cb) {
+    let cancelled = false
+    let cleanupActiveRequest = null
+
     const _requestCb = () => {
+      if (cancelled) return
       const defaultOpts = { timeout: 60000 }
 
       if (typeof opts === 'function') {
@@ -856,39 +890,62 @@ export class MessageBuilder extends EventBus {
       let timer1 = null
       let hasReturned = false
 
+      const finish = (error, result) => {
+        if (hasReturned || cancelled) return
+        hasReturned = true
+        this.off('response', transact)
+        this.off('error', onError)
+        if (timer1) clearTimeout(timer1)
+        timer1 = null
+        cb(error, result)
+      }
+
       const transact = ({ traceId, payload }) => {
         // logger.debug('traceId=>%d payload=>%s', traceId, payload.toString('hex'))
         if (traceId === requestId) {
-          const resultJson = this.buf2Json(payload)
-          // logger.debug('request id=>%d payload=>%j', requestId, data)
-          // logger.debug('response id=>%d payload=>%j', requestId, resultJson)
-
-          this.off('response', transact)
-          timer1 && clearTimeout(timer1)
-          timer1 = null
-          hasReturned = true
-          cb(null, resultJson)
+          try {
+            finish(null, this.buf2Json(payload))
+          } catch (error) {
+            finish(error)
+          }
         }
       }
 
+      const onError = (error) => finish(error)
+
       this.on('response', transact)
+      this.on('error', onError)
       this.sendJson({ requestId, json: data, type: MessagePayloadType.Request })
+
+      cleanupActiveRequest = () => {
+        if (hasReturned) return
+        hasReturned = true
+        this.off('response', transact)
+        this.off('error', onError)
+        if (timer1) clearTimeout(timer1)
+        timer1 = null
+      }
 
       if (opts.timeout > 0) {
         timer1 = setTimeout(() => {
           timer1 = null
-          if (hasReturned) {
-            return
-          }
-
-          // logger.error(`request time out in ${opts.timeout}ms error=>%d data=>%j`, requestId, data)
-          this.off('response', transact)
-          cb(Error(`Timed out in ${opts.timeout}ms.`))
+          finish(Error(`Timed out in ${opts.timeout}ms.`))
         }, opts.timeout)
       }
     }
 
-    return this.waitingShakePromise.then(_requestCb)
+    let cancelReady = null
+    if (this.isDevice) {
+      cancelReady = this.whenReady(_requestCb)
+    } else {
+      this.waitingShakePromise.then(_requestCb)
+    }
+
+    return () => {
+      cancelled = true
+      if (cancelReady) cancelReady()
+      if (cleanupActiveRequest) cleanupActiveRequest()
+    }
   }
 
   response({ requestId, data }) {

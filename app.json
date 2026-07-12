@@ -12,7 +12,7 @@
     "description": "The watchface for watchdrip application",
     "icon": "icon.png"
   },
-  "permissions": ["data:os.device.info", "device:os.alarm", "device:os.ble", "device:os.bg_service"],
+  "permissions": ["data:os.device.info", "device:os.ble", "device:os.bg_service"],
   "runtime": {
     "apiVersion": {
       "compatible": "3.0.0",

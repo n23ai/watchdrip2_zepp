@@ -24,7 +24,6 @@ import {
     BG_VALUE_TEXT,
     COMMON_BUTTON_ADD_TREATMENT,
     COMMON_BUTTON_SETTINGS,
-    COMMON_BUTTON_START_BACKGROUND,
     CONFIG_PAGE_SCROLL,
     DEVICE_TYPE,
     IMG_LOADING_PROGRESS,
@@ -40,14 +39,15 @@ import {WatchdripData} from "../utils/watchdrip/watchdrip-data";
 import {getDataTypeConfig, img} from "../utils/helper";
 import {gotoSubpage} from "../shared/navigate";
 import {WatchdripConfig} from "../utils/watchdrip/config";
-import {getBackgroundDebugText, markBackgroundDebug} from "../utils/watchdrip/background-debug";
+import {markBackgroundDebug} from "../utils/watchdrip/background-debug";
 import {Path} from "../utils/path";
+import {formatLogLine} from "../shared/log-format";
 import {DEVICE_WIDTH} from "../utils/config/device";
 
 import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
 import { Time, Vibrator } from '@zos/sensor'
 import { getPackageInfo, queryPermission, requestPermission } from '@zos/app'
-import { getAllAppServices, start as startAppService, stop as stopAppService } from '@zos/app-service'
+import { getAllAppServices, start as startAppService } from '@zos/app-service'
 import { goBack, home } from '@zos/router'
 import { log, px } from '@zos/utils'
 import { setPageBrightTime, resetPageBrightTime, setWakeUpRelaunch } from '@zos/display'
@@ -58,50 +58,28 @@ const ENABLE_TREATMENT_UI = false;
 const BG_SERVICE_PERMISSION = 'device:os.bg_service';
 const BG_SERVICE_FILE = 'app-service/index';
 const BG_SERVICE_PARAM = 'mode=continuous&source=manual';
+const BG_SERVICE_VERIFY_DELAY_MS = 1500;
+const CACHE_READ_RETRY_DELAYS_MS = [250, 750];
 const {appId} = getPackageInfo();
 const ble = require('@zos/ble');
 
 var debug = null;
 var watchdrip = null;
-var backgroundServiceStartPending = false;
+var backgroundServiceOperationPending = false;
+var backgroundServiceRunSequence = 0;
 
-function setBackgroundServiceControl(stage, text) {
-    if (!(watchdrip && watchdrip.conf)) return;
-    watchdrip.conf.read();
-    watchdrip.conf.serviceControl = {
-        stage,
-        text,
-        at: watchdrip.timeSensor.getTime(),
-    };
-    watchdrip.conf.save();
-    if (watchdrip.backgroundServiceButton) {
-        watchdrip.backgroundServiceButton.setProperty(prop.MORE, {text});
-    }
+function bgPageLog(stage, detail = '') {
+    logger.log(formatLogLine('WD_BG', 'PAGE', stage, detail ? {detail} : {}));
 }
 
-function savePageBackgroundDebug(stage, fields = {}) {
-    if (!(watchdrip && watchdrip.conf)) {
-        return;
-    }
-    watchdrip.conf.read();
-    const previous = watchdrip.conf.backgroundDebug || {};
-    const at = watchdrip.timeSensor.getTime();
-    const item = {
-        stage,
-        at,
-        result: fields.result,
-        error: fields.error,
-        alarmId: fields.alarmId,
-    };
-    watchdrip.conf.backgroundDebug = {
-        stage,
-        at,
-        count: (previous.count || 0) + 1,
-        history: [...(previous.history || []), item].slice(-6),
-        ...fields,
-    };
-    watchdrip.conf.save();
-    watchdrip.updateServiceDebugWidget();
+function uiLog(event, fields = {}) {
+    const text = formatLogLine('WD_UI', 'PAGE', event, fields);
+    logger.log(text);
+}
+
+function formatError(error) {
+    if (!error) return '';
+    return String(error.stack || error.message || error);
 }
 
 function isWatchdripServiceRunning(serviceList) {
@@ -116,123 +94,74 @@ function isWatchdripServiceRunning(serviceList) {
     return false;
 }
 
+function schedulePageTask(callback, delay) {
+    const globalNS = watchdrip && watchdrip.globalNS ? watchdrip.globalNS : getGlobal();
+    return globalNS.setTimeout(callback, delay);
+}
+
+function getServiceList(stage) {
+    try {
+        const serviceList = getAllAppServices() || [];
+        bgPageLog(stage, JSON.stringify(serviceList));
+        return serviceList;
+    } catch (e) {
+        bgPageLog(stage + '_ERROR', formatError(e));
+        return null;
+    }
+}
+
 function invokeWatchdripServiceStart() {
     try {
-        if (backgroundServiceStartPending) {
-            savePageBackgroundDebug('manual_service_start_pending');
-            return;
-        }
-
-        backgroundServiceStartPending = true;
-        console.log("watchdrip app_service_start_call file=" + BG_SERVICE_FILE);
-        logger.log("app_service_start_call file=" + BG_SERVICE_FILE);
-        savePageBackgroundDebug('manual_service_start_call', {result: BG_SERVICE_PARAM});
-        setBackgroundServiceControl('service_start_call', 'BG starting...');
+        backgroundServiceOperationPending = true;
+        const run = ++backgroundServiceRunSequence;
+        bgPageLog('START_CALL', 'run=' + run);
         const startResult = startAppService({
             file: BG_SERVICE_FILE,
             param: BG_SERVICE_PARAM,
             complete_func: (info) => {
-                backgroundServiceStartPending = false;
                 const result = info ? info.result : 'no-info';
-                console.log("watchdrip app-service start callback: " + result);
-                logger.log("app-service start callback: " + result);
-                savePageBackgroundDebug('manual_service_start_cb', {result: String(result)});
-                let running = false;
-                try {
-                    running = isWatchdripServiceRunning(getAllAppServices() || []);
-                } catch (e) {}
-                setBackgroundServiceControl(
-                    'service_start_cb',
-                    'BG cb=' + result + ' run=' + running
-                );
+                bgPageLog('START_CB', 'run=' + run + ' result=' + result);
             }
         });
-        console.log("watchdrip app_service_start_ret: " + startResult);
-        logger.log("app_service_start_ret: " + startResult);
-        savePageBackgroundDebug('manual_service_start_ret', {result: String(startResult)});
-        setBackgroundServiceControl('service_start_ret', 'BG ret=' + startResult);
+        bgPageLog('START_RET', 'run=' + run + ' result=' + startResult);
         if (Number(startResult) !== 0) {
-            backgroundServiceStartPending = false;
+            backgroundServiceOperationPending = false;
+            return;
         }
+        schedulePageTask(() => {
+            const list = getServiceList('LIST_AFTER_START');
+            const running = isWatchdripServiceRunning(list);
+            backgroundServiceOperationPending = false;
+            bgPageLog('START_LIST_CHECK', 'run=' + run + ' listed=' + running);
+        }, BG_SERVICE_VERIFY_DELAY_MS);
     } catch (e) {
-        backgroundServiceStartPending = false;
-        console.log("watchdrip app-service start error: " + e);
-        logger.error("app-service start error: " + e);
-        savePageBackgroundDebug('manual_service_start_error', {error: String(e)});
-        setBackgroundServiceControl('service_start_error', 'BG start error');
-    }
-}
-
-function restartWatchdripBackgroundService() {
-    backgroundServiceStartPending = true;
-    savePageBackgroundDebug('manual_service_restart_call');
-    setBackgroundServiceControl('service_restart_call', 'BG restarting...');
-    const stopResult = stopAppService({
-        file: BG_SERVICE_FILE,
-        complete_func: (info) => {
-            backgroundServiceStartPending = false;
-            const result = !!(info && info.result);
-            savePageBackgroundDebug('manual_service_stop_cb', {result: String(result)});
-            if (result) {
-                invokeWatchdripServiceStart();
-            } else {
-                setBackgroundServiceControl('service_stop_error', 'BG stop failed');
-            }
-        }
-    });
-    savePageBackgroundDebug('manual_service_stop_ret', {result: String(stopResult)});
-    if (Number(stopResult) !== 0) {
-        backgroundServiceStartPending = false;
-        setBackgroundServiceControl('service_stop_error', 'BG stop ret=' + stopResult);
+        backgroundServiceOperationPending = false;
+        bgPageLog('START_ERROR', formatError(e));
     }
 }
 
 function startWatchdripBackgroundService() {
     try {
-        if (backgroundServiceStartPending) {
-            savePageBackgroundDebug('manual_service_start_pending');
+        if (backgroundServiceOperationPending) {
+            bgPageLog('OPERATION_PENDING');
             return;
         }
-
-        let serviceList = [];
-        let serviceListKnown = false;
-        try {
-            serviceList = getAllAppServices() || [];
-            serviceListKnown = true;
-            const serviceListText = JSON.stringify(serviceList);
-            console.log("watchdrip running app services: " + serviceListText);
-            logger.log("running app services: " + serviceListText);
-            savePageBackgroundDebug('manual_service_list', {result: serviceListText});
-            setBackgroundServiceControl('service_list', 'BG list=' + serviceList.length);
-        } catch (e) {
-            console.log("watchdrip getAllAppServices error: " + e);
-            logger.error("getAllAppServices error: " + e);
-            savePageBackgroundDebug('manual_service_list_error', {error: String(e)});
-        }
-
-        if (serviceListKnown && isWatchdripServiceRunning(serviceList)) {
-            console.log("watchdrip background service restart requested");
-            logger.log("background service restart requested");
-            restartWatchdripBackgroundService();
+        const serviceList = getServiceList('LIST_BEFORE_START');
+        if (serviceList && isWatchdripServiceRunning(serviceList)) {
+            bgPageLog('ALREADY_RUNNING');
             return;
         }
         invokeWatchdripServiceStart();
     } catch (e) {
-        backgroundServiceStartPending = false;
-        console.log("watchdrip app-service start error: " + e);
-        logger.error("app-service start error: " + e);
-        savePageBackgroundDebug('manual_service_start_error', {error: String(e)});
-        setBackgroundServiceControl('service_start_error', 'BG start error');
+        backgroundServiceOperationPending = false;
+        bgPageLog('CONTROL_ERROR', formatError(e));
     }
 }
 
 function requestAndStartWatchdripBackgroundService() {
     try {
         const permissionState = queryPermission({permissions: [BG_SERVICE_PERMISSION]});
-        console.log("watchdrip bg_service permission state: " + JSON.stringify(permissionState));
-        logger.log("bg_service permission state: " + JSON.stringify(permissionState));
-        savePageBackgroundDebug('manual_permission_state', {result: JSON.stringify(permissionState)});
-        setBackgroundServiceControl('permission_state', 'BG permission=' + (permissionState ? permissionState[0] : '?'));
+        bgPageLog('PERMISSION_STATE', JSON.stringify(permissionState));
         if (permissionState && permissionState[0] === 2) {
             startWatchdripBackgroundService();
             return;
@@ -242,10 +171,7 @@ function requestAndStartWatchdripBackgroundService() {
         const handlePermissionResult = (result) => {
             if (permissionHandled) return;
             permissionHandled = true;
-            console.log("watchdrip bg_service permission callback: " + JSON.stringify(result));
-            logger.log("bg_service permission callback: " + JSON.stringify(result));
-            savePageBackgroundDebug('manual_permission_cb', {result: JSON.stringify(result)});
-            setBackgroundServiceControl('permission_cb', 'BG permission=' + (result ? result[0] : '?'));
+            bgPageLog('PERMISSION_CB', JSON.stringify(result));
             if (result && result[0] === 2) {
                 startWatchdripBackgroundService();
             }
@@ -254,17 +180,12 @@ function requestAndStartWatchdripBackgroundService() {
             permissions: [BG_SERVICE_PERMISSION],
             callback: handlePermissionResult,
         });
-        console.log("watchdrip bg_service permission request ret: " + requestResult);
-        logger.log("bg_service permission request ret: " + requestResult);
-        savePageBackgroundDebug('manual_permission_ret', {result: String(requestResult)});
+        bgPageLog('PERMISSION_RET', String(requestResult));
         if (requestResult === 2) {
             handlePermissionResult([2]);
         }
     } catch (e) {
-        console.log("watchdrip bg_service permission error: " + e);
-        logger.error("bg_service permission error: " + e);
-        savePageBackgroundDebug('manual_permission_error', {error: String(e)});
-        setBackgroundServiceControl('permission_error', 'BG permission error');
+        bgPageLog('PERMISSION_ERROR', formatError(e));
     }
 }
 
@@ -294,6 +215,7 @@ class Watchdrip {
         this.foregroundFetchInFlight = false;
         this.intervalTimer = null;
         this.progressTimer = null;
+        this.cacheReadRetryTimer = null;
         this.serviceDebugTextWidget = null;
         this.updateIntervals = DATA_UPDATE_INTERVAL_MS;
         this.fetchMode = FetchMode.DISPLAY;
@@ -366,33 +288,20 @@ class Watchdrip {
             align_h: align.CENTER_H,
             align_v: align.CENTER_V,
             text_style: text_style.NONE,
-            text: getBackgroundDebugText(this.conf, this.timeSensor),
+            text: 'BG: see bridge logs',
         });
 
         if (this.conf.settings.disableUpdates) {
             this.showMessage(getText("data_upd_disabled"));
         } else {
-            if (this.readInfo()) {
-                this.updateWidgets();
-            }
             this.readLocalInfo();
-            this.fetchRemoteInfo();
-            this.startDataUpdates();
+            requestAndStartWatchdripBackgroundService();
         }
 
         createWidget(widget.BUTTON, {
             ...COMMON_BUTTON_SETTINGS,
             click_func: (button_widget) => {
                 gotoSubpage(PagesType.CONFIG);
-            },
-        });
-
-        const serviceControlText = this.conf.serviceControl && this.conf.serviceControl.text;
-        this.backgroundServiceButton = createWidget(widget.BUTTON, {
-            ...COMMON_BUTTON_START_BACKGROUND,
-            text: serviceControlText || getText("start_background_service"),
-            click_func: () => {
-                this.startBackgroundServiceManual();
             },
         });
 
@@ -404,13 +313,6 @@ class Watchdrip {
                 },
             });
         }
-    }
-
-    startBackgroundServiceManual() {
-        debug.log("manual background service start");
-        this.vibrateNow();
-        savePageBackgroundDebug('manual_button_pressed');
-        requestAndStartWatchdripBackgroundService();
     }
 
     getConfigData() {
@@ -574,20 +476,49 @@ class Watchdrip {
         if (this.fetchMode === FetchMode.DISPLAY) {
             this.showMessage(getText("connecting"));
         }
-        
-        let data = this.infoFile.fetchJSON();
-        if (data) {
-            this.watchdripData.setData(data);
-            this.watchdripData.updateTimeDiff();
+
+        this.cancelCacheReadRetry();
+        this.readLocalInfoAttempt(0);
+    }
+
+    readLocalInfoAttempt(attempt) {
+        const result = this.readInfoResult();
+        if (result.ok) {
+            uiLog('CACHE_READ_OK', {attempt});
             this.updateWidgets();
+            this.finishLocalInfoRead();
+            return;
         }
-        
+
+        if (attempt < CACHE_READ_RETRY_DELAYS_MS.length) {
+            const nextAttempt = attempt + 1;
+            const delay = CACHE_READ_RETRY_DELAYS_MS[attempt];
+            uiLog('CACHE_READ_RETRY', {attempt: nextAttempt, reason: result.reason});
+            this.cacheReadRetryTimer = this.globalNS.setTimeout(() => {
+                this.cacheReadRetryTimer = null;
+                this.readLocalInfoAttempt(nextAttempt);
+            }, delay);
+            return;
+        }
+
+        uiLog('CACHE_READ_FAILED', {attempt, reason: result.reason});
+        this.finishLocalInfoRead();
+    }
+
+    finishLocalInfoRead() {
         if (this.fetchMode === FetchMode.DISPLAY) {
             this.setMessageVisibility(false);
             this.setBgElementsVisibility(true);
         } else {
             this.stopLoader();
             this.handleGoBack();
+        }
+    }
+
+    cancelCacheReadRetry() {
+        if (this.cacheReadRetryTimer !== null) {
+            this.globalNS.clearTimeout(this.cacheReadRetryTimer);
+            this.cacheReadRetryTimer = null;
         }
     }
 
@@ -721,9 +652,8 @@ class Watchdrip {
         if (!this.serviceDebugTextWidget) {
             return;
         }
-        this.conf.read();
         this.serviceDebugTextWidget.setProperty(prop.MORE, {
-            text: getBackgroundDebugText(this.conf, this.timeSensor),
+            text: 'BG: see bridge logs',
         });
     }
 
@@ -746,7 +676,15 @@ class Watchdrip {
         });
 
         this.bgTrendImageWidget.setProperty(prop.SRC, bgObj.getArrowResource());
-        this.bgStaleLine.setProperty(prop.VISIBLE, this.watchdripData.isBgStale());
+        const staleReasons = this.watchdripData.getBgStaleReasons();
+        this.bgStaleLine.setProperty(prop.VISIBLE, staleReasons.length > 0);
+        if (staleReasons.length > 0) {
+            const age = this.watchdripData.getBgAgeMs();
+            uiLog('BG_STALE', {
+                reason: staleReasons.join(','),
+                ageSec: age === null ? 'unknown' : Math.floor(age / 1000),
+            });
+        }
     }
 
     updateTimesWidget() {
@@ -758,6 +696,7 @@ class Watchdrip {
 
     showMessage(text) {
         this.setBgElementsVisibility(false);
+        this.bgStaleLine.setProperty(prop.VISIBLE, false);
         this.messageTextWidget.setProperty(prop.MORE, {text: text});
         this.setMessageVisibility(true);
     }
@@ -766,7 +705,6 @@ class Watchdrip {
         this.bgValTextWidget.setProperty(prop.VISIBLE, visibility);
         this.bgValTimeTextWidget.setProperty(prop.VISIBLE, visibility);
         this.bgTrendImageWidget.setProperty(prop.VISIBLE, visibility);
-        this.bgStaleLine.setProperty(prop.VISIBLE, visibility);
         this.bgDeltaTextWidget.setProperty(prop.VISIBLE, visibility);
     }
 
@@ -774,16 +712,20 @@ class Watchdrip {
         this.messageTextWidget.setProperty(prop.VISIBLE, visibility);
     }
 
-    readInfo() {
-        let data = this.infoFile.fetchJSON();
+    readInfoResult() {
+        const result = this.infoFile.fetchJSONResult();
+        const data = result.data;
         if (data) {
             debug.log("data was read");
             this.watchdripData.setData(data);
-            this.watchdripData.timeDiff = 0;
-            data = null;
-            return true
+            this.watchdripData.updateTimeDiff();
+            return { ok: true, reason: '' };
         }
-        return false;
+        return { ok: false, reason: result.reason || 'missing' };
+    }
+
+    readInfo() {
+        return this.readInfoResult().ok;
     }
 
     readLastUpdate() {
@@ -857,6 +799,7 @@ class Watchdrip {
     }
 
     onDestroy() {
+        this.cancelCacheReadRetry();
         this.conf.save();
         this.stopDataUpdates();
         if (this.foregroundMessageBuilder) {
