@@ -1,4 +1,3 @@
-import {json2str, str2json} from "../shared/data";
 import {DebugText} from "../shared/debug";
 import {getGlobal} from "../shared/global";
 import { MessageBuilder } from "../shared/message";
@@ -41,16 +40,15 @@ import {WatchdripData} from "../utils/watchdrip/watchdrip-data";
 import {getDataTypeConfig, img} from "../utils/helper";
 import {gotoSubpage} from "../shared/navigate";
 import {WatchdripConfig} from "../utils/watchdrip/config";
-import {scheduleBackgroundFetchAlarm} from "../utils/watchdrip/background-alarm";
-import {getBackgroundDebugText} from "../utils/watchdrip/background-debug";
+import {getBackgroundDebugText, markBackgroundDebug} from "../utils/watchdrip/background-debug";
 import {Path} from "../utils/path";
 import {DEVICE_WIDTH} from "../utils/config/device";
 
 import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
 import { Time, Vibrator } from '@zos/sensor'
 import { getPackageInfo, queryPermission, requestPermission } from '@zos/app'
-import { start as startAppService } from '@zos/app-service'
-import { goBack, home, setLaunchAppTimeout, clearLaunchAppTimeout } from '@zos/router'
+import { getAllAppServices, start as startAppService, stop as stopAppService } from '@zos/app-service'
+import { goBack, home } from '@zos/router'
 import { log, px } from '@zos/utils'
 import { setPageBrightTime, resetPageBrightTime, setWakeUpRelaunch } from '@zos/display'
 import { getSystemInfo } from '@zos/device'
@@ -58,73 +56,215 @@ import { getSystemInfo } from '@zos/device'
 const logger = log.getLogger("watchdrip_app");
 const ENABLE_TREATMENT_UI = false;
 const BG_SERVICE_PERMISSION = 'device:os.bg_service';
-
+const BG_SERVICE_FILE = 'app-service/index';
+const BG_SERVICE_PARAM = 'mode=continuous&source=manual';
 const {appId} = getPackageInfo();
 const ble = require('@zos/ble');
 
 var debug = null;
 var watchdrip = null;
+var backgroundServiceStartPending = false;
+
+function setBackgroundServiceControl(stage, text) {
+    if (!(watchdrip && watchdrip.conf)) return;
+    watchdrip.conf.read();
+    watchdrip.conf.serviceControl = {
+        stage,
+        text,
+        at: watchdrip.timeSensor.getTime(),
+    };
+    watchdrip.conf.save();
+    if (watchdrip.backgroundServiceButton) {
+        watchdrip.backgroundServiceButton.setProperty(prop.MORE, {text});
+    }
+}
 
 function savePageBackgroundDebug(stage, fields = {}) {
     if (!(watchdrip && watchdrip.conf)) {
         return;
     }
+    watchdrip.conf.read();
+    const previous = watchdrip.conf.backgroundDebug || {};
+    const at = watchdrip.timeSensor.getTime();
+    const item = {
+        stage,
+        at,
+        result: fields.result,
+        error: fields.error,
+        alarmId: fields.alarmId,
+    };
     watchdrip.conf.backgroundDebug = {
         stage,
-        at: watchdrip.timeSensor.getTime(),
-        count: ((watchdrip.conf.backgroundDebug && watchdrip.conf.backgroundDebug.count) || 0) + 1,
+        at,
+        count: (previous.count || 0) + 1,
+        history: [...(previous.history || []), item].slice(-6),
         ...fields,
     };
     watchdrip.conf.save();
     watchdrip.updateServiceDebugWidget();
 }
 
-function startWatchdripServiceFromPage(source = 'auto') {
-    try {
-        const permissionState = queryPermission({permissions: [BG_SERVICE_PERMISSION]});
-        console.log("watchdrip page bg_service permission state: " + JSON.stringify(permissionState));
-        savePageBackgroundDebug(source + '_permission_state', {result: JSON.stringify(permissionState)});
+function isWatchdripServiceRunning(serviceList) {
+    if (!Array.isArray(serviceList)) {
+        return false;
+    }
+    for (let i = 0; i < serviceList.length; i++) {
+        if (String(serviceList[i]).replace(/\.js$/, '') === BG_SERVICE_FILE) {
+            return true;
+        }
+    }
+    return false;
+}
 
-        if (permissionState && permissionState[0] === 2) {
-            startWatchdripServiceNow(source);
+function invokeWatchdripServiceStart() {
+    try {
+        if (backgroundServiceStartPending) {
+            savePageBackgroundDebug('manual_service_start_pending');
             return;
         }
 
-        const requestResult = requestPermission({
-            permissions: [BG_SERVICE_PERMISSION],
-            callback: (result) => {
-                console.log("watchdrip page bg_service permission request result: " + JSON.stringify(result));
-                savePageBackgroundDebug(source + '_permission_request', {result: JSON.stringify(result)});
-                if (result && result[0] === 2) {
-                    startWatchdripServiceNow(source);
-                }
+        backgroundServiceStartPending = true;
+        console.log("watchdrip app_service_start_call file=" + BG_SERVICE_FILE);
+        logger.log("app_service_start_call file=" + BG_SERVICE_FILE);
+        savePageBackgroundDebug('manual_service_start_call', {result: BG_SERVICE_PARAM});
+        setBackgroundServiceControl('service_start_call', 'BG starting...');
+        const startResult = startAppService({
+            file: BG_SERVICE_FILE,
+            param: BG_SERVICE_PARAM,
+            complete_func: (info) => {
+                backgroundServiceStartPending = false;
+                const result = info ? info.result : 'no-info';
+                console.log("watchdrip app-service start callback: " + result);
+                logger.log("app-service start callback: " + result);
+                savePageBackgroundDebug('manual_service_start_cb', {result: String(result)});
+                let running = false;
+                try {
+                    running = isWatchdripServiceRunning(getAllAppServices() || []);
+                } catch (e) {}
+                setBackgroundServiceControl(
+                    'service_start_cb',
+                    'BG cb=' + result + ' run=' + running
+                );
             }
         });
-        console.log("watchdrip page permission request ret: " + requestResult);
+        console.log("watchdrip app_service_start_ret: " + startResult);
+        logger.log("app_service_start_ret: " + startResult);
+        savePageBackgroundDebug('manual_service_start_ret', {result: String(startResult)});
+        setBackgroundServiceControl('service_start_ret', 'BG ret=' + startResult);
+        if (Number(startResult) !== 0) {
+            backgroundServiceStartPending = false;
+        }
     } catch (e) {
-        console.log("watchdrip page service permission error: " + e);
-        savePageBackgroundDebug(source + '_permission_error', {error: String(e)});
+        backgroundServiceStartPending = false;
+        console.log("watchdrip app-service start error: " + e);
+        logger.error("app-service start error: " + e);
+        savePageBackgroundDebug('manual_service_start_error', {error: String(e)});
+        setBackgroundServiceControl('service_start_error', 'BG start error');
     }
 }
 
-function startWatchdripServiceNow(source = 'auto') {
-    try {
-        console.log("watchdrip page app_service_start_call");
-        savePageBackgroundDebug(source + '_service_start_call');
-        const ret = startAppService({
-            file: 'app-service/index',
-            param: 'source=' + source + '&manual=' + (source === 'manual' ? '1' : '0'),
-            complete_func: (info) => {
-                const result = info ? info.result : 'no-info';
-                console.log("watchdrip page app-service start result: " + result);
-                savePageBackgroundDebug(source + '_service_start_cb', {result: String(result)});
+function restartWatchdripBackgroundService() {
+    backgroundServiceStartPending = true;
+    savePageBackgroundDebug('manual_service_restart_call');
+    setBackgroundServiceControl('service_restart_call', 'BG restarting...');
+    const stopResult = stopAppService({
+        file: BG_SERVICE_FILE,
+        complete_func: (info) => {
+            backgroundServiceStartPending = false;
+            const result = !!(info && info.result);
+            savePageBackgroundDebug('manual_service_stop_cb', {result: String(result)});
+            if (result) {
+                invokeWatchdripServiceStart();
+            } else {
+                setBackgroundServiceControl('service_stop_error', 'BG stop failed');
             }
-        });
-        console.log("watchdrip page app_service_start_ret: " + ret);
-        savePageBackgroundDebug(source + '_service_start_ret', {result: String(ret)});
+        }
+    });
+    savePageBackgroundDebug('manual_service_stop_ret', {result: String(stopResult)});
+    if (Number(stopResult) !== 0) {
+        backgroundServiceStartPending = false;
+        setBackgroundServiceControl('service_stop_error', 'BG stop ret=' + stopResult);
+    }
+}
+
+function startWatchdripBackgroundService() {
+    try {
+        if (backgroundServiceStartPending) {
+            savePageBackgroundDebug('manual_service_start_pending');
+            return;
+        }
+
+        let serviceList = [];
+        let serviceListKnown = false;
+        try {
+            serviceList = getAllAppServices() || [];
+            serviceListKnown = true;
+            const serviceListText = JSON.stringify(serviceList);
+            console.log("watchdrip running app services: " + serviceListText);
+            logger.log("running app services: " + serviceListText);
+            savePageBackgroundDebug('manual_service_list', {result: serviceListText});
+            setBackgroundServiceControl('service_list', 'BG list=' + serviceList.length);
+        } catch (e) {
+            console.log("watchdrip getAllAppServices error: " + e);
+            logger.error("getAllAppServices error: " + e);
+            savePageBackgroundDebug('manual_service_list_error', {error: String(e)});
+        }
+
+        if (serviceListKnown && isWatchdripServiceRunning(serviceList)) {
+            console.log("watchdrip background service restart requested");
+            logger.log("background service restart requested");
+            restartWatchdripBackgroundService();
+            return;
+        }
+        invokeWatchdripServiceStart();
     } catch (e) {
-        console.log("watchdrip page app-service start error: " + e);
-        savePageBackgroundDebug(source + '_service_start_error', {error: String(e)});
+        backgroundServiceStartPending = false;
+        console.log("watchdrip app-service start error: " + e);
+        logger.error("app-service start error: " + e);
+        savePageBackgroundDebug('manual_service_start_error', {error: String(e)});
+        setBackgroundServiceControl('service_start_error', 'BG start error');
+    }
+}
+
+function requestAndStartWatchdripBackgroundService() {
+    try {
+        const permissionState = queryPermission({permissions: [BG_SERVICE_PERMISSION]});
+        console.log("watchdrip bg_service permission state: " + JSON.stringify(permissionState));
+        logger.log("bg_service permission state: " + JSON.stringify(permissionState));
+        savePageBackgroundDebug('manual_permission_state', {result: JSON.stringify(permissionState)});
+        setBackgroundServiceControl('permission_state', 'BG permission=' + (permissionState ? permissionState[0] : '?'));
+        if (permissionState && permissionState[0] === 2) {
+            startWatchdripBackgroundService();
+            return;
+        }
+
+        let permissionHandled = false;
+        const handlePermissionResult = (result) => {
+            if (permissionHandled) return;
+            permissionHandled = true;
+            console.log("watchdrip bg_service permission callback: " + JSON.stringify(result));
+            logger.log("bg_service permission callback: " + JSON.stringify(result));
+            savePageBackgroundDebug('manual_permission_cb', {result: JSON.stringify(result)});
+            setBackgroundServiceControl('permission_cb', 'BG permission=' + (result ? result[0] : '?'));
+            if (result && result[0] === 2) {
+                startWatchdripBackgroundService();
+            }
+        };
+        const requestResult = requestPermission({
+            permissions: [BG_SERVICE_PERMISSION],
+            callback: handlePermissionResult,
+        });
+        console.log("watchdrip bg_service permission request ret: " + requestResult);
+        logger.log("bg_service permission request ret: " + requestResult);
+        savePageBackgroundDebug('manual_permission_ret', {result: String(requestResult)});
+        if (requestResult === 2) {
+            handlePermissionResult([2]);
+        }
+    } catch (e) {
+        console.log("watchdrip bg_service permission error: " + e);
+        logger.error("bg_service permission error: " + e);
+        savePageBackgroundDebug('manual_permission_error', {error: String(e)});
+        setBackgroundServiceControl('permission_error', 'BG permission error');
     }
 }
 
@@ -132,7 +272,6 @@ const GoBackType = {NONE: 'none', GO_BACK: 'go_back', HIDE_PAGE: 'hide_page', HI
 const PagesType = {
     MAIN: 'main',
     UPDATE: 'update',
-    UPDATE_LOCAL: 'update_local',
     HIDE: 'hide',
     CONFIG: 'config',
     ADD_TREATMENT: 'add_treatment'
@@ -147,7 +286,6 @@ class Watchdrip {
         this.globalNS = getGlobal();
         this.goBackType = GoBackType.NONE;
         this.intervalWatchdog = null;
-        this.system_alarm_id = null;
         this.lastInfoUpdate = 0;
         this.lastUpdateAttempt = null;
         this.lastUpdateSucessful = false;
@@ -184,10 +322,6 @@ class Watchdrip {
                 this.conf.alarmSettings = {...this.conf.alarmSettings, ...data.params};
                 this.fetch_page();
                 break;
-            case PagesType.UPDATE_LOCAL:
-                this.goBackType = GoBackType.HIDE;
-                this.fetch_page_local();
-                break;
             case PagesType.HIDE:
                 this.hide_page();
                 break;
@@ -213,8 +347,6 @@ class Watchdrip {
     main_page() {
         setPageBrightTime({ brightTime: 60000 });
         setWakeUpRelaunch(true);
-        this.prepareNextAlarm();
-        scheduleBackgroundFetchAlarm('page');
         let pkg = getPackageInfo();
         this.versionTextWidget = createWidget(widget.TEXT, {...VERSION_TEXT, text: "v" + pkg.version});
         this.messageTextWidget = createWidget(widget.TEXT, {...MESSAGE_TEXT, text: ""});
@@ -226,7 +358,7 @@ class Watchdrip {
         this.bgStaleLine.setProperty(prop.VISIBLE, false);
         this.serviceDebugTextWidget = createWidget(widget.TEXT, {
             x: px(30),
-            y: px(285),
+            y: px(250),
             w: DEVICE_WIDTH - px(60),
             h: px(28),
             color: 0x999999,
@@ -255,9 +387,11 @@ class Watchdrip {
             },
         });
 
-        createWidget(widget.BUTTON, {
+        const serviceControlText = this.conf.serviceControl && this.conf.serviceControl.text;
+        this.backgroundServiceButton = createWidget(widget.BUTTON, {
             ...COMMON_BUTTON_START_BACKGROUND,
-            click_func: (button_widget) => {
+            text: serviceControlText || getText("start_background_service"),
+            click_func: () => {
                 this.startBackgroundServiceManual();
             },
         });
@@ -274,16 +408,9 @@ class Watchdrip {
 
     startBackgroundServiceManual() {
         debug.log("manual background service start");
-        try {
-            this.vibrateNow();
-            savePageBackgroundDebug('manual_button_pressed');
-            const alarmId = scheduleBackgroundFetchAlarm('manual_button');
-            savePageBackgroundDebug('manual_alarm_scheduled', {alarmId});
-            startWatchdripServiceFromPage('manual');
-        } catch (e) {
-            debug.log("manual background start error: " + e);
-            savePageBackgroundDebug('manual_start_error', {error: String(e)});
-        }
+        this.vibrateNow();
+        savePageBackgroundDebug('manual_button_pressed');
+        requestAndStartWatchdripBackgroundService();
     }
 
     getConfigData() {
@@ -420,29 +547,6 @@ class Watchdrip {
     fetch_page() {
         debug.log("fetch_page");
         setStatusBarVisible(false);
-        this.prepareNextAlarm();
-        if (this.conf.settings.disableUpdates || !this.conf.settings.useAppFetch) {
-            this.handleGoBack();
-            return;
-        }
-        setPageBrightTime({ brightTime: 999000 });
-        this.progressWidget = createWidget(widget.IMG, IMG_LOADING_PROGRESS);
-        this.progressAngle = 0;
-        this.fetchMode = FetchMode.HIDDEN;
-        this.startLoader();
-        this.fetchRemoteInfo({
-            updateUI: false,
-            onDone: () => {
-                this.stopLoader();
-                this.handleGoBack();
-            }
-        });
-    }
-
-    fetch_page_local() {
-        debug.log("fetch_page_local");
-        setStatusBarVisible(false);
-        this.prepareNextAlarm();
         if (this.conf.settings.disableUpdates || !this.conf.settings.useAppFetch) {
             this.handleGoBack();
             return;
@@ -510,6 +614,7 @@ class Watchdrip {
             return;
         }
         debug.log("fetchRemoteInfo");
+        markBackgroundDebug('fetch_start', { mode: this.fetchMode });
         this.foregroundFetchInFlight = true;
         this.updatingData = true;
         this.lastUpdateAttempt = this.timeSensor.getTime();
@@ -553,6 +658,7 @@ class Watchdrip {
                         this.updateWidgets();
                     }
                     debug.log("fetchRemoteInfo success");
+                    markBackgroundDebug('fetch_success', { result: 'saved' });
                 } else {
                     debug.log("fetchRemoteInfo bad result: " + JSON.stringify(info));
                     this.lastUpdateSucessful = false;
@@ -728,41 +834,6 @@ class Watchdrip {
         return time;
     }
 
-    saveAlarmId(alarm_id) {
-        debug.log("saveAlarmId");
-        this.conf.alarm_id = alarm_id;
-    }
-
-    disableCurrentAlarm() {
-        debug.log("disableCurrentAlarm");
-        const alarm_id = this.conf.alarm_id;
-        if (alarm_id && alarm_id !== -1) {
-            debug.log("stop old app alarm");
-            clearLaunchAppTimeout({ timeoutId: alarm_id });
-            this.saveAlarmId('-1');
-        }
-    }
-
-    prepareNextAlarm() {
-        this.disableCurrentAlarm();
-        if (this.conf.settings.disableUpdates || !this.conf.settings.useAppFetch) {
-            if (this.system_alarm_id !== null) {
-                clearLaunchAppTimeout({ timeoutId: this.system_alarm_id });
-            }
-            return;
-        }
-        debug.log("Next alarm in " + this.conf.alarmSettings.fetchInterval + "s");
-        if (this.system_alarm_id == null) {
-            this.system_alarm_id = setLaunchAppTimeout({
-                appId: appId,
-                url: "page/index",
-                params: json2str({ page: PagesType.UPDATE_LOCAL }),
-                delay: this.conf.alarmSettings.fetchInterval * 1000,
-            });
-            this.saveAlarmId(this.system_alarm_id);
-        }
-    }
-
     handleGoBack() {
         switch (this.goBackType) {
             case GoBackType.NONE:
@@ -794,12 +865,16 @@ class Watchdrip {
         }
         this.vibrate.stop();
         resetPageBrightTime();
+
+        // The next timeout is scheduled once when the hidden page starts.
     }
 }
 
 Page({
     onInit(p) {
-        logger.debug("page onInit invoked");
+        markBackgroundDebug('wake_entered', { params: String(p || '') });
+        logger.debug("page onInit invoked: " + String(p));
+        markBackgroundDebug('page_onInit', { params: String(p || '') });
         this.p = p;
     },
     build() {
@@ -816,6 +891,11 @@ Page({
             } catch (e) {
                 data = {page: this.p}
             }
+
+            markBackgroundDebug('page_params_parsed', {
+                page: data.page,
+                source: data.source || ''
+            });
 
             watchdrip = new Watchdrip()
             watchdrip.start(data);

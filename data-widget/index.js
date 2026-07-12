@@ -3,125 +3,69 @@ import { Path } from '../utils/path'
 import { WatchdripData } from '../utils/watchdrip/watchdrip-data'
 import { WF_INFO_FILE } from '../utils/config/global-constants'
 import { Colors } from '../utils/config/constants'
-import { scheduleBackgroundFetchAlarm } from '../utils/watchdrip/background-alarm'
-import { WatchdripConfig } from '../utils/watchdrip/config'
-import { getBackgroundDebugText, markBackgroundDebug } from '../utils/watchdrip/background-debug'
-import { createWidget, widget, prop, align, text_style } from '@zos/ui'
+import { createWidget, getAppWidgetSize, widget, prop, align, text_style } from '@zos/ui'
 import { px, log } from '@zos/utils'
-import { getDeviceInfo } from '@zos/device'
-import { start as startAppService } from '@zos/app-service'
-import { queryPermission, requestPermission } from '@zos/app'
-const { width: DEVICE_WIDTH, height: DEVICE_HEIGHT } = getDeviceInfo()
-const centerX = DEVICE_WIDTH / 2
-const topOffset = DEVICE_HEIGHT > 400 ? px(68) : px(60)
+
 const logger = log.getLogger('watchdrip_widget')
-const BG_SERVICE_PERMISSION = 'device:os.bg_service'
+const AGE_REFRESH_MS = 60000
+const COLOR_RED = 0xFF4444
+const COLOR_GREEN = 0x44FF44
+const COLOR_YELLOW = 0xFFCC00
 
-const getCardContentMetrics = () => {
-  const contentWidth = Math.min(px(380), DEVICE_WIDTH - px(80))
+function getCardMetrics() {
+  const size = getAppWidgetSize()
+  const cardWidth = size && size.w ? size.w : px(400)
+  const cardHeight = size && size.h ? size.h : px(220)
+  const contentWidth = Math.max(px(180), Math.min(px(380), cardWidth - px(40)))
   return {
+    cardWidth,
+    cardHeight,
     contentWidth,
-    contentX: (DEVICE_WIDTH - contentWidth) / 2,
+    contentX: (cardWidth - contentWidth) / 2,
   }
 }
 
-const startWatchdripService = () => {
-  if (typeof startAppService !== 'function') {
-    logger.warn("data-widget startAppService is not available")
-    markBackgroundDebug('widget_service_unavailable')
-    return
-  }
-
-  const result = startAppService({
-    file: 'app-service/index',
-    complete_func: (info) => {
-      const cbResult = info ? info.result : 'no-info'
-      logger.log("data-widget app-service start result: " + cbResult)
-      markBackgroundDebug('widget_service_start_cb', { result: String(cbResult) })
-    }
-  })
-  markBackgroundDebug('widget_service_start_ret', { result: String(result) })
-}
-
-const startWatchdripServiceWithPermission = () => {
-  try {
-    const permissionState = queryPermission({ permissions: [BG_SERVICE_PERMISSION] })
-    logger.log("data-widget bg_service permission state: " + JSON.stringify(permissionState))
-    markBackgroundDebug('widget_permission_state', { result: JSON.stringify(permissionState) })
-    if (permissionState && permissionState[0] === 2) {
-      startWatchdripService()
-      return
-    }
-
-    requestPermission({
-      permissions: [BG_SERVICE_PERMISSION],
-      callback: (result) => {
-        logger.log("data-widget bg_service permission request result: " + JSON.stringify(result))
-        markBackgroundDebug('widget_permission_request', { result: JSON.stringify(result) })
-        if (result && result[0] === 2) {
-          startWatchdripService()
-        }
-      }
-    })
-  } catch (e) {
-    logger.error('data-widget permission error: ' + e)
-    markBackgroundDebug('widget_permission_error', { error: String(e) })
-    startWatchdripService()
-  }
-}
-
-const scheduleWatchdripServiceAlarm = () => {
-  try {
-    const alarmId = scheduleBackgroundFetchAlarm('widget')
-    logger.log('data-widget service alarm id: ' + alarmId)
-    markBackgroundDebug('widget_alarm_scheduled', { alarmId })
-  } catch (e) {
-    logger.error('data-widget schedule alarm error: ' + e)
-    markBackgroundDebug('widget_alarm_error', { error: String(e) })
-  }
-}
-
-DataWidget({
+AppWidget({
   state: {
     timeSensor: null,
     watchdripData: null,
     infoFile: null,
-    updateTimer: null,
-    // Widgets
-    titleWidget: null,
+    ageTimer: null,
+    contentX: 0,
+    barWidth: 0,
     bgValTextWidget: null,
     bgTrendImageWidget: null,
     bgSubtitleWidget: null,
-    debugTextWidget: null,
     barPointerWidget: null,
   },
 
   onInit() {
-    logger.log('widget onInit')
     try {
       this.state.timeSensor = new Time()
       this.state.watchdripData = new WatchdripData(this.state.timeSensor)
-      this.state.infoFile = new Path("full", WF_INFO_FILE)
-      scheduleWatchdripServiceAlarm()
-      startWatchdripServiceWithPermission()
-      markBackgroundDebug('widget_onInit')
+      this.state.infoFile = new Path('full', WF_INFO_FILE)
     } catch (e) {
       logger.error('widget onInit error: ' + e)
-      markBackgroundDebug('widget_onInit_error', { error: String(e) })
     }
   },
 
   build() {
-    logger.log('widget build')
     try {
-      // The Shortcut Card container is centered on the device screen.
-      // We center our content relative to the entire screen width to ensure it perfectly aligns inside the card.
-      const { contentWidth, contentX } = getCardContentMetrics()
+      const { contentWidth, contentX } = getCardMetrics()
       const barY = px(138)
-      const BAR_TOTAL_W = contentWidth
-      
-      // Title
-      this.state.titleWidget = createWidget(widget.TEXT, {
+      const barHeight = px(16)
+      const lowWidth = Math.floor(contentWidth * (2 / 18))
+      const normalWidth = Math.floor(contentWidth * (6 / 18))
+      const highWidth = Math.floor(contentWidth * (5 / 18))
+      const veryHighWidth = contentWidth - lowWidth - normalWidth - highWidth
+      const valueWidth = px(110)
+      const arrowWidth = px(41)
+      const valueX = contentX + (contentWidth - valueWidth - arrowWidth) / 2
+
+      this.state.contentX = contentX
+      this.state.barWidth = contentWidth
+
+      createWidget(widget.TEXT, {
         x: contentX,
         y: px(20),
         w: contentWidth,
@@ -131,37 +75,30 @@ DataWidget({
         align_h: align.CENTER_H,
         align_v: align.CENTER_V,
         text_style: text_style.NONE,
-        text: 'WatchDrip2'
+        text: 'WatchDrip2',
       })
 
-      // Big value
-      const valW = px(110)
-      const arrowW = px(41)
-      const centerOffsetX = contentX + (contentWidth - (valW + arrowW)) / 2
-
       this.state.bgValTextWidget = createWidget(widget.TEXT, {
-        x: centerOffsetX,
+        x: valueX,
         y: px(50),
-        w: valW,
+        w: valueWidth,
         h: px(55),
         color: Colors.white,
         text_size: px(50),
         align_h: align.RIGHT,
         align_v: align.CENTER_V,
         text_style: text_style.NONE,
-        text: '--'
+        text: '--',
       })
 
-      // Trend arrow
       this.state.bgTrendImageWidget = createWidget(widget.IMG, {
-        x: centerOffsetX + valW + px(10), // slight padding between text and arrow
+        x: valueX + valueWidth + px(10),
         y: px(58),
-        w: arrowW,
+        w: arrowWidth,
         h: px(39),
-        src: 'watchdrip/arrows/None.png'
+        src: 'watchdrip/arrows/None.png',
       })
 
-      // Subtitle (Time + Delta)
       this.state.bgSubtitleWidget = createWidget(widget.TEXT, {
         x: contentX,
         y: px(100),
@@ -172,199 +109,156 @@ DataWidget({
         align_h: align.CENTER_H,
         align_v: align.CENTER_V,
         text_style: text_style.NONE,
-        text: 'Сейчас'
+        text: '--',
       })
 
-      // Progress bar zones
-      const BAR_H = px(16)
-      const W_LOW = Math.floor(BAR_TOTAL_W * (2/18))
-      const W_NORM = Math.floor(BAR_TOTAL_W * (6/18))
-      const W_HIGH = Math.floor(BAR_TOTAL_W * (5/18))
-      const W_VERY_HIGH = BAR_TOTAL_W - W_LOW - W_NORM - W_HIGH
-
-      // Progress bar colors
-      const COLOR_RED = 0xFF4444
-      const COLOR_GREEN = 0x44FF44
-      const COLOR_YELLOW = 0xFFCC00
-
-      // Low (< 4) -> Red
       createWidget(widget.FILL_RECT, {
         x: contentX,
         y: barY,
-        w: W_LOW,
-        h: BAR_H,
+        w: lowWidth,
+        h: barHeight,
         color: COLOR_RED,
-        radius: px(4)
+        radius: px(4),
       })
-
-      // Normal (4 - 10) -> Green
       createWidget(widget.FILL_RECT, {
-        x: contentX + W_LOW,
+        x: contentX + lowWidth,
         y: barY,
-        w: W_NORM,
-        h: BAR_H,
-        color: COLOR_GREEN
+        w: normalWidth,
+        h: barHeight,
+        color: COLOR_GREEN,
       })
-
-      // High (10 - 15) -> Yellow
       createWidget(widget.FILL_RECT, {
-        x: contentX + W_LOW + W_NORM,
+        x: contentX + lowWidth + normalWidth,
         y: barY,
-        w: W_HIGH,
-        h: BAR_H,
-        color: COLOR_YELLOW
+        w: highWidth,
+        h: barHeight,
+        color: COLOR_YELLOW,
       })
-
-      // Very High (> 15) -> Red
       createWidget(widget.FILL_RECT, {
-        x: contentX + W_LOW + W_NORM + W_HIGH,
+        x: contentX + lowWidth + normalWidth + highWidth,
         y: barY,
-        w: W_VERY_HIGH,
-        h: BAR_H,
+        w: veryHighWidth,
+        h: barHeight,
         color: COLOR_RED,
-        radius: px(4)
+        radius: px(4),
       })
 
-      // Pointer (White vertical line)
       this.state.barPointerWidget = createWidget(widget.FILL_RECT, {
         x: contentX,
         y: barY - px(5),
         w: px(5),
         h: px(26),
         color: Colors.white,
-        radius: px(3)
+        radius: px(3),
       })
 
-      this.state.debugTextWidget = createWidget(widget.TEXT, {
-        x: contentX,
-        y: barY + px(24),
-        w: contentWidth,
-        h: px(20),
-        color: 0x777777,
-        text_size: px(16),
-        align_h: align.CENTER_H,
-        align_v: align.CENTER_V,
-        text_style: text_style.NONE,
-        text: 'dbg: init'
-      })
-
-      this.updateUI()
+      this.readAndRender()
     } catch (e) {
       logger.error('widget build error: ' + e)
-      markBackgroundDebug('widget_build_error', { error: String(e) })
     }
   },
 
   onResume() {
-    logger.log('widget onResume')
     try {
-      scheduleWatchdripServiceAlarm()
-      startWatchdripServiceWithPermission()
-      markBackgroundDebug('widget_onResume')
-      this.updateUI()
-      if (this.state.updateTimer) {
-        clearInterval(this.state.updateTimer)
-        this.state.updateTimer = null
-      }
-      this.state.updateTimer = setInterval(() => {
-        this.updateUI()
-      }, 5000)
+      this.readAndRender()
+      this.stopAgeTimer()
+      this.state.ageTimer = setInterval(() => {
+        this.updateSubtitle()
+      }, AGE_REFRESH_MS)
     } catch (e) {
       logger.error('widget onResume error: ' + e)
-      markBackgroundDebug('widget_onResume_error', { error: String(e) })
     }
   },
 
   onPause() {
-    logger.log('widget onPause')
-    try {
-      if (this.state.updateTimer) {
-        clearInterval(this.state.updateTimer)
-        this.state.updateTimer = null
-      }
-    } catch (e) {
-      logger.error('widget onPause error: ' + e)
-      markBackgroundDebug('widget_onPause_error', { error: String(e) })
-    }
+    this.stopAgeTimer()
   },
 
   onDestroy() {
-    logger.log('widget onDestroy')
-    try {
-      if (this.state.updateTimer) {
-        clearInterval(this.state.updateTimer)
-        this.state.updateTimer = null
-      }
-    } catch (e) {
-      logger.error('widget onDestroy error: ' + e)
-      markBackgroundDebug('widget_onDestroy_error', { error: String(e) })
+    this.stopAgeTimer()
+  },
+
+  stopAgeTimer() {
+    if (this.state.ageTimer) {
+      clearInterval(this.state.ageTimer)
+      this.state.ageTimer = null
     }
   },
 
-  updateUI() {
-    logger.log('widget updateUI')
+  readAndRender() {
     try {
-      const conf = new WatchdripConfig()
-      if (this.state.debugTextWidget) {
-        this.state.debugTextWidget.setProperty(prop.MORE, {
-          text: getBackgroundDebugText(conf, this.state.timeSensor)
-        })
+      const data = this.state.infoFile && this.state.infoFile.fetchJSON()
+      if (!data || !data.bg || typeof data.bg !== 'object') {
+        this.renderNoData()
+        return
       }
 
-      const data = this.state.infoFile.fetchJSON()
-      if (data) {
-        this.state.watchdripData.setData(data)
-        this.state.watchdripData.timeDiff = 0
-
-        const bgObj = this.state.watchdripData.getBg()
-        let val = parseFloat(bgObj.getBGVal())
-
-        const COLOR_RED = 0xFF4444
-        const COLOR_YELLOW = 0xFFCC00
-        let bgValColor = Colors.white
-
-        if (!isNaN(val)) {
-          if (val <= 4.0) {
-            bgValColor = COLOR_RED
-          } else if (val <= 10.0) {
-            bgValColor = Colors.white
-          } else if (val <= 15.0) {
-            bgValColor = COLOR_YELLOW
-          } else {
-            bgValColor = COLOR_RED
-          }
-        }
-
-        this.state.bgValTextWidget.setProperty(prop.MORE, {
-          text: bgObj.getBGVal() || '--',
-          color: bgValColor
-        })
-
-        // Subtitle: Time ago + Delta
-        let timeAgo = this.state.watchdripData.getTimeAgo(bgObj.time) || ''
-        let delta = bgObj.delta || ''
-        let unit = this.state.watchdripData.getStatus().getUnitText()
-        this.state.bgSubtitleWidget.setProperty(prop.MORE, {
-          text: `${timeAgo}  ${delta} ${unit}`
-        })
-
-        this.state.bgTrendImageWidget.setProperty(prop.SRC, bgObj.getArrowResource())
-
-        // Update pointer position
-        if (!isNaN(val)) {
-          // Normalize val between 2.0 and 20.0
-          if (val < 2.0) val = 2.0
-          if (val > 20.0) val = 20.0
-          
-          let fraction = (val - 2.0) / 18.0
-          const { contentWidth: BAR_TOTAL_W, contentX } = getCardContentMetrics()
-          let pointerX = contentX + Math.floor(BAR_TOTAL_W * fraction) - px(2)
-          this.state.barPointerWidget.setProperty(prop.X, pointerX)
-        }
-      }
+      this.state.watchdripData.setData(data)
+      this.state.watchdripData.updateTimeDiff()
+      this.renderData()
     } catch (e) {
-      logger.error('widget updateUI error: ' + e)
-      markBackgroundDebug('widget_update_error', { error: String(e) })
+      logger.error('widget read error: ' + e)
+      this.renderNoData()
     }
-  }
+  },
+
+  renderNoData() {
+    if (this.state.bgValTextWidget) {
+      this.state.bgValTextWidget.setProperty(prop.MORE, {
+        text: '--',
+        color: Colors.white,
+      })
+    }
+    if (this.state.bgSubtitleWidget) {
+      this.state.bgSubtitleWidget.setProperty(prop.MORE, { text: '--' })
+    }
+    if (this.state.bgTrendImageWidget) {
+      this.state.bgTrendImageWidget.setProperty(prop.SRC, 'watchdrip/arrows/None.png')
+    }
+    if (this.state.barPointerWidget) {
+      this.state.barPointerWidget.setProperty(prop.X, this.state.contentX)
+    }
+  },
+
+  renderData() {
+    const bg = this.state.watchdripData.getBg()
+    const valueText = bg.getBGVal() || '--'
+    let value = parseFloat(valueText)
+    let valueColor = Colors.white
+
+    if (!isNaN(value)) {
+      if (value <= 4 || value > 15) valueColor = COLOR_RED
+      else if (value > 10) valueColor = COLOR_YELLOW
+    }
+
+    this.state.bgValTextWidget.setProperty(prop.MORE, {
+      text: valueText,
+      color: valueColor,
+    })
+    this.state.bgTrendImageWidget.setProperty(prop.SRC, bg.getArrowResource())
+    this.updateSubtitle()
+
+    if (!isNaN(value)) {
+      value = Math.max(2, Math.min(20, value))
+      const fraction = (value - 2) / 18
+      const pointerX = this.state.contentX + Math.floor(this.state.barWidth * fraction) - px(2)
+      this.state.barPointerWidget.setProperty(prop.X, pointerX)
+    }
+  },
+
+  updateSubtitle() {
+    if (!this.state.watchdripData || !this.state.bgSubtitleWidget) return
+    const bg = this.state.watchdripData.getBg()
+    if (!bg || !bg.getBGVal()) {
+      this.state.bgSubtitleWidget.setProperty(prop.MORE, { text: '--' })
+      return
+    }
+
+    const timeAgo = this.state.watchdripData.getTimeAgo(bg.time) || ''
+    const delta = bg.delta || ''
+    const unit = this.state.watchdripData.getStatus().getUnitText()
+    this.state.bgSubtitleWidget.setProperty(prop.MORE, {
+      text: `${timeAgo}  ${delta} ${unit}`,
+    })
+  },
 })

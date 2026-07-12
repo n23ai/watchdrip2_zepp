@@ -1,6 +1,39 @@
   - Enter 'help' to view the command.
 bridge$ connect
-[8D[8C[1000D[Kbridge$ c[9D[9C[1000D[Kbridge$ co[10D[10C[1000D[Kbridge$ con[11D[11C[1000D[Kbridge$ conn[12D[12C[1000D[Kbridge$ conne[13D[13C[1000D[Kbridge$ connec[14D[14C[1000D[Kbridge$ connect[15D[15C[1000D[Kbridge$ [36mconnect[39m[15D[15C
+[8D[8C[1000D[Kbridge$ c[9D[9C[1000D[Kbridge$ co[10D[10C[1000D[Kbridge$ con[11D[11C[1000D[Kbridge$ conn[12D[12C[1000D[Kbridge$ conne[13D[13C[1000D[Kbridge$ connec[14D[14C[1000D[Kbridge$ connect[15D[15C[1000D[Kbridge$ connect[15D[15C
 bridge$ [8D[8C[ℹ] successfully connected to app-Android.
-[ℹ] [DEBUG-10:58:14 PM.399] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783367893811,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"[interrupt] processInfo list => []"}}
-[ℹ] [DEBUG-10:58:14 PM.406] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783367893810,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"interrupt"}}
+install -t common
+[1000D[Kbridge$ i[9D[9C[1000D[Kbridge$ in[10D[10C[1000D[Kbridge$ ins[11D[11C[1000D[Kbridge$ inst[12D[12C[1000D[Kbridge$ insta[13D[13C[1000D[Kbridge$ instal[14D[14C[1000D[Kbridge$ install[15D[15C[1000D[Kbridge$ install [16D[16C[1000D[Kbridge$ install -[17D[17C[1000D[Kbridge$ install -t[18D[18C[1000D[Kbridge$ install -t [19D[19C[1000D[Kbridge$ install -t c[20D[20C[1000D[Kbridge$ install -t co[21D[21C[1000D[Kbridge$ install -t com[22D[22C[1000D[Kbridge$ install -t comm[23D[23C[1000D[Kbridge$ install -t commo[24D[24C[1000D[Kbridge$ install -t common[25D[25C[1000D[Kbridge$ install -t common[25D[25C
+[ℹ] building...
+[⚠] Unsupported targets(mi-band7) have been removed.
+[ℹ] Start building package, targets: common.
+[WARNING] In order to achieve better display effects on Zepp OS
+[WARNING] The minimum width and height of the image /Users/nikolaj/Documents/dev/zepp/watchdrip2_zepp/assets/common/icon.png needs to be 248
+[WARNING] Please checkout the Design Guide: https://docs.zepp.com/docs/designs/visual/icons/
+[ROLLUP] Transform 6 JS files in 426ms
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 45ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 24ms, done!
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 35ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 37ms, done!
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 46ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 26ms, done!
+[ℹ] getting package...
+bridge$ [8D[8C[ℹ] Start install lite app
+[ℹ] [DEBUG-1:27:44 AM.903] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464349,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.mobileAppStore\",\"action\":\"eventHappened\"},\"params\":{\"data\":{\"appId\":43107},\"type\":\"appInstalled\",\"target\":\"zeppAppStore\",\"timestamp\":1783722464346}}]"}}
+[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"app.sapp.page\",\"action\":\"close\"},\"params\":{\"appId\":43107}}]"}}
+[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.system\",\"action\":\"eventHappened\"},\"params\":{\"type\":\"sideServiceClosed\",\"data\":{\"appId\":43107}}}]"}}
+[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":4,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"process-mgr","tag":"-","message":"App LifeCycle Status: Destroy. ProcessInfo=appId[43107] processId[ef9b78f9e5e72-1abc685bd92bb0-e70eb816177d9-1410777f07ebbb] devicePort[0] sidePort[1048]"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464357,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"response [13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec\",\"result\":{\"message\":\"success\"}}"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464356,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"request [13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec\",\"method\":{\"module\":\"main.heartBeat.heartBeatInfo\",\"action\":\"close\"},\"params\":{\"timeout\":4000}}"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464358,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}]"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464359,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"result\":{\"success\":true}}]"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464360,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"response [6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"result\":{\"success\":true}}"}}
+[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464360,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"request [6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}"}}
+[ℹ] Install lite app result: success
+exit

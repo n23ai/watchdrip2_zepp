@@ -102,19 +102,6 @@
               }
             }
           ]
-        },
-        "secondary-widget": {
-          "widgets": [
-            {
-              "path": "data-widget/index",
-              "name": "WatchDrip2 Widget",
-              "icon": "icon.png",
-              "preview": "icon.png",
-              "runtime": {
-                "type": "js"
-              }
-            }
-          ]
         }
       },
       "platforms": [
@@ -179,25 +166,11 @@
             "name": "WatchDrip2"
           }
         ]
-      },
-      "secondary-widget": {
-        "widgets": [
-          {
-            "name": "WatchDrip2"
-          }
-        ]
       }
     },
     "ru-RU": {
       "appName": "WatchDrip2",
       "app-widget": {
-        "widgets": [
-          {
-            "name": "WatchDrip2"
-          }
-        ]
-      },
-      "secondary-widget": {
         "widgets": [
           {
             "name": "WatchDrip2"

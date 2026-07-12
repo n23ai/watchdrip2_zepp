@@ -17,7 +17,6 @@ import {
 import { getDeviceInfo } from '@zos/device'
 import { getPackageInfo } from '@zos/app'
 
-const deviceID = getDeviceInfo().deviceName;
 export const isMiBand7 = false;
 
 export class Path {
