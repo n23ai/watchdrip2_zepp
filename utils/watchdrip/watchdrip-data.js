@@ -17,6 +17,7 @@ export class WatchdripData {
         this.treatment = TreatmentData.createEmpty();
         /** @var PumpData $object */
         this.pump = PumpData.createEmpty();
+        this.graph = null;
         /* defines the difference in time between phone and watch*/
         this.timeDiff = 0;
     }
@@ -30,6 +31,7 @@ export class WatchdripData {
     }
 
     setData(data) {
+        this.graph = data && data.graph && typeof data.graph === 'object' ? data.graph : null;
         if (data['bg'] === undefined) {
             this.bg = BgData.createEmpty();
         } else {
@@ -71,6 +73,10 @@ export class WatchdripData {
     /** @return PumpData $object */
     getPump() {
         return this.pump;
+    }
+
+    getGraph() {
+        return this.graph;
     }
 
     isBgStale() {

@@ -21,7 +21,7 @@ export class StatusData {
         if (this.isMgdl) {
             return "mg/dl";
         }
-        return "mmol";
+        return "mmol/L";
     }
 
     static createEmpty() {

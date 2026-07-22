@@ -59,7 +59,11 @@ const BG_SERVICE_PERMISSION = 'device:os.bg_service';
 const BG_SERVICE_FILE = 'app-service/index';
 const BG_SERVICE_PARAM = 'mode=continuous&source=manual';
 const BG_SERVICE_VERIFY_DELAY_MS = 1500;
-const CACHE_READ_RETRY_DELAYS_MS = [250, 750];
+const BG_SERVICE_RETRY_DELAY_MS = 2000;
+const BG_SERVICE_MAX_ATTEMPTS = 2;
+const CACHE_READ_RETRY_DELAYS_MS = [250, 750, 1500, 2500];
+const POST_START_CACHE_REFRESH_DELAYS_MS = [750, 1500, 3000, 5000, 10000, 25000, 45000, 65000];
+const AGE_REFRESH_INTERVAL_MS = 1000;
 const {appId} = getPackageInfo();
 const ble = require('@zos/ble');
 
@@ -67,6 +71,8 @@ var debug = null;
 var watchdrip = null;
 var backgroundServiceOperationPending = false;
 var backgroundServiceRunSequence = 0;
+var backgroundServiceCheckTimer = null;
+var backgroundServiceRetryTimer = null;
 
 function bgPageLog(stage, detail = '') {
     logger.log(formatLogLine('WD_BG', 'PAGE', stage, detail ? {detail} : {}));
@@ -110,60 +116,101 @@ function getServiceList(stage) {
     }
 }
 
-function invokeWatchdripServiceStart() {
+function finishBackgroundServiceEnsure(run, attempt, success, onReady, reason = '') {
+    backgroundServiceOperationPending = false;
+    if (success) {
+        bgPageLog('ENSURE_OK', 'run=' + run + ' attempt=' + attempt + (reason ? ' reason=' + reason : ''));
+        if (onReady) onReady();
+        return;
+    }
+
+    if (attempt < BG_SERVICE_MAX_ATTEMPTS) {
+        bgPageLog('RECOVERY_RETRY', 'run=' + run + ' attempt=' + attempt + ' reason=' + (reason || 'unknown'));
+        if (backgroundServiceRetryTimer !== null) {
+            const globalNS = watchdrip && watchdrip.globalNS ? watchdrip.globalNS : getGlobal();
+            globalNS.clearTimeout(backgroundServiceRetryTimer);
+        }
+        backgroundServiceRetryTimer = schedulePageTask(() => {
+            backgroundServiceRetryTimer = null;
+            startWatchdripBackgroundService(onReady, attempt + 1, run);
+        }, BG_SERVICE_RETRY_DELAY_MS);
+        return;
+    }
+
+    bgPageLog('ENSURE_FAILED', 'run=' + run + ' attempt=' + attempt + ' reason=' + (reason || 'unknown'));
+}
+
+function invokeWatchdripServiceStart(onReady, attempt, run) {
     try {
         backgroundServiceOperationPending = true;
-        const run = ++backgroundServiceRunSequence;
-        bgPageLog('START_CALL', 'run=' + run);
+        let callbackReceived = false;
+        let callbackSuccess = false;
         const startResult = startAppService({
             file: BG_SERVICE_FILE,
             param: BG_SERVICE_PARAM,
             complete_func: (info) => {
+                callbackReceived = true;
+                callbackSuccess = !!(info && info.result);
                 const result = info ? info.result : 'no-info';
-                bgPageLog('START_CB', 'run=' + run + ' result=' + result);
+                bgPageLog('START_CB', 'run=' + run + ' attempt=' + attempt + ' result=' + result);
             }
         });
-        bgPageLog('START_RET', 'run=' + run + ' result=' + startResult);
-        if (Number(startResult) !== 0) {
-            backgroundServiceOperationPending = false;
+        const syncSuccess = startResult === 0 || startResult === true;
+        bgPageLog('START_RET', 'run=' + run + ' attempt=' + attempt + ' result=' + startResult);
+        if (!syncSuccess) {
+            finishBackgroundServiceEnsure(run, attempt, false, onReady, 'sync_' + startResult);
             return;
         }
-        schedulePageTask(() => {
-            const list = getServiceList('LIST_AFTER_START');
+
+        backgroundServiceCheckTimer = schedulePageTask(() => {
+            backgroundServiceCheckTimer = null;
+            const list = getServiceList('LIST_AFTER');
             const running = isWatchdripServiceRunning(list);
-            backgroundServiceOperationPending = false;
-            bgPageLog('START_LIST_CHECK', 'run=' + run + ' listed=' + running);
+            const callbackOk = callbackReceived && callbackSuccess;
+            bgPageLog('START_LIST_CHECK', 'run=' + run + ' attempt=' + attempt +
+                ' listed=' + running + ' callback=' + callbackOk);
+            if (syncSuccess && callbackOk && running) {
+                finishBackgroundServiceEnsure(run, attempt, true, onReady, 'started');
+            } else {
+                const reason = !callbackReceived ? 'callback_missing' :
+                    (!callbackSuccess ? 'callback_failed' :
+                        (!running ? 'service_missing' : 'verification_failed'));
+                finishBackgroundServiceEnsure(run, attempt, false, onReady, reason);
+            }
         }, BG_SERVICE_VERIFY_DELAY_MS);
     } catch (e) {
-        backgroundServiceOperationPending = false;
-        bgPageLog('START_ERROR', formatError(e));
+        bgPageLog('START_ERROR', 'run=' + run + ' attempt=' + attempt + ' error=' + formatError(e));
+        finishBackgroundServiceEnsure(run, attempt, false, onReady, 'exception');
     }
 }
 
-function startWatchdripBackgroundService() {
+function startWatchdripBackgroundService(onReady, attempt = 1, run = 0) {
     try {
-        if (backgroundServiceOperationPending) {
+        if (backgroundServiceOperationPending || backgroundServiceRetryTimer !== null) {
             bgPageLog('OPERATION_PENDING');
             return;
         }
+        const operationRun = run || ++backgroundServiceRunSequence;
+        bgPageLog('ENSURE_BEGIN', 'run=' + operationRun + ' attempt=' + attempt);
         const serviceList = getServiceList('LIST_BEFORE_START');
         if (serviceList && isWatchdripServiceRunning(serviceList)) {
-            bgPageLog('ALREADY_RUNNING');
+            bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt);
+            finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
             return;
         }
-        invokeWatchdripServiceStart();
+        invokeWatchdripServiceStart(onReady, attempt, operationRun);
     } catch (e) {
         backgroundServiceOperationPending = false;
-        bgPageLog('CONTROL_ERROR', formatError(e));
+        bgPageLog('CONTROL_ERROR', 'error=' + formatError(e));
     }
 }
 
-function requestAndStartWatchdripBackgroundService() {
+function requestAndStartWatchdripBackgroundService(onReady) {
     try {
         const permissionState = queryPermission({permissions: [BG_SERVICE_PERMISSION]});
         bgPageLog('PERMISSION_STATE', JSON.stringify(permissionState));
         if (permissionState && permissionState[0] === 2) {
-            startWatchdripBackgroundService();
+            startWatchdripBackgroundService(onReady);
             return;
         }
 
@@ -173,7 +220,7 @@ function requestAndStartWatchdripBackgroundService() {
             permissionHandled = true;
             bgPageLog('PERMISSION_CB', JSON.stringify(result));
             if (result && result[0] === 2) {
-                startWatchdripBackgroundService();
+                startWatchdripBackgroundService(onReady);
             }
         };
         const requestResult = requestPermission({
@@ -214,8 +261,14 @@ class Watchdrip {
         this.foregroundMessageBuilder = null;
         this.foregroundFetchInFlight = false;
         this.intervalTimer = null;
+        this.ageRefreshTimer = null;
         this.progressTimer = null;
         this.cacheReadRetryTimer = null;
+        this.cacheRefreshTimer = null;
+        this.cacheRefreshToken = 0;
+        this.cacheSnapshotKey = null;
+        this.cacheRefreshActive = false;
+        this.destroyed = false;
         this.serviceDebugTextWidget = null;
         this.updateIntervals = DATA_UPDATE_INTERVAL_MS;
         this.fetchMode = FetchMode.DISPLAY;
@@ -278,6 +331,7 @@ class Watchdrip {
         this.bgTrendImageWidget = createWidget(widget.IMG, BG_TREND_IMAGE);
         this.bgStaleLine = createWidget(widget.FILL_RECT, BG_STALE_RECT);
         this.bgStaleLine.setProperty(prop.VISIBLE, false);
+        this.startAgeRefresh();
         this.serviceDebugTextWidget = createWidget(widget.TEXT, {
             x: px(30),
             y: px(250),
@@ -295,7 +349,11 @@ class Watchdrip {
             this.showMessage(getText("data_upd_disabled"));
         } else {
             this.readLocalInfo();
-            requestAndStartWatchdripBackgroundService();
+            requestAndStartWatchdripBackgroundService(() => {
+                if (watchdrip) {
+                    watchdrip.schedulePostStartCacheRefresh();
+                }
+            });
         }
 
         createWidget(widget.BUTTON, {
@@ -383,6 +441,32 @@ class Watchdrip {
             this.globalNS.clearInterval(this.intervalTimer);
             this.intervalTimer = null;
         }
+    }
+
+    startAgeRefresh() {
+        if (this.ageRefreshTimer !== null) return;
+        this.ageRefreshTimer = this.globalNS.setInterval(() => {
+            if (this.destroyed) return;
+            try {
+                this.updateAgePresentation();
+            } catch (e) {
+                uiLog('AGE_REFRESH_ERROR', {reason: 'render'});
+            }
+        }, AGE_REFRESH_INTERVAL_MS);
+    }
+
+    stopAgeRefresh() {
+        if (this.ageRefreshTimer !== null) {
+            this.globalNS.clearInterval(this.ageRefreshTimer);
+            this.ageRefreshTimer = null;
+        }
+    }
+
+    updateAgePresentation() {
+        if (!this.bgValTimeTextWidget || !this.bgStaleLine) return;
+        this.updateTimesWidget();
+        const staleReasons = this.watchdripData.getBgStaleReasons();
+        this.bgStaleLine.setProperty(prop.VISIBLE, staleReasons.length > 0);
     }
 
     isTimeout(time, timeout_ms) {
@@ -473,11 +557,20 @@ class Watchdrip {
 
     readLocalInfo(params = '') {
         debug.log("readLocalInfo");
+        this.cancelCacheReadRetry();
+        this.cancelCacheRefresh();
+
+        const initialResult = this.readInfoResult();
+        if (initialResult.ok) {
+            uiLog('CACHE_READ_OK', {attempt: 0});
+            this.updateWidgets();
+            this.finishLocalInfoRead();
+            return;
+        }
+
         if (this.fetchMode === FetchMode.DISPLAY) {
             this.showMessage(getText("connecting"));
         }
-
-        this.cancelCacheReadRetry();
         this.readLocalInfoAttempt(0);
     }
 
@@ -502,7 +595,9 @@ class Watchdrip {
         }
 
         uiLog('CACHE_READ_FAILED', {attempt, reason: result.reason});
-        this.finishLocalInfoRead();
+        if (!this.cacheRefreshActive) {
+            this.finishLocalInfoRead();
+        }
     }
 
     finishLocalInfoRead() {
@@ -520,6 +615,65 @@ class Watchdrip {
             this.globalNS.clearTimeout(this.cacheReadRetryTimer);
             this.cacheReadRetryTimer = null;
         }
+    }
+
+    cancelCacheRefresh() {
+        this.cacheRefreshToken += 1;
+        this.cacheRefreshActive = false;
+        if (this.cacheRefreshTimer !== null) {
+            this.globalNS.clearTimeout(this.cacheRefreshTimer);
+            this.cacheRefreshTimer = null;
+        }
+    }
+
+    schedulePostStartCacheRefresh() {
+        if (this.destroyed) return;
+        this.cancelCacheRefresh();
+        this.cacheRefreshActive = true;
+        const token = this.cacheRefreshToken;
+        let attempt = 0;
+        let sawValidSnapshot = false;
+
+        const refresh = () => {
+            if (token !== this.cacheRefreshToken) return;
+            this.cacheRefreshTimer = null;
+
+            const result = this.readInfoResult();
+            if (result.ok) {
+                sawValidSnapshot = true;
+                uiLog('CACHE_REFRESH_OK', {
+                    attempt,
+                    changed: result.changed ? 1 : 0,
+                });
+                if (result.changed) {
+                    this.updateWidgets();
+                    this.cacheRefreshActive = false;
+                    uiLog('CACHE_REFRESH_DONE', {attempt, reason: 'new_snapshot'});
+                    return;
+                }
+            } else {
+                uiLog('CACHE_REFRESH_RETRY', {attempt, reason: result.reason});
+            }
+
+            if (attempt >= POST_START_CACHE_REFRESH_DELAYS_MS.length - 1) {
+                this.cacheRefreshActive = false;
+                if (!sawValidSnapshot) {
+                    uiLog('CACHE_REFRESH_FAILED', {attempt, reason: 'no_valid_snapshot'});
+                    this.finishLocalInfoRead();
+                } else {
+                    uiLog('CACHE_REFRESH_DONE', {attempt, reason: 'unchanged'});
+                }
+                return;
+            }
+
+            const delay = POST_START_CACHE_REFRESH_DELAYS_MS[attempt + 1] -
+                POST_START_CACHE_REFRESH_DELAYS_MS[attempt];
+            attempt += 1;
+            this.cacheRefreshTimer = this.globalNS.setTimeout(refresh, delay);
+        };
+
+        this.cacheRefreshTimer = this.globalNS.setTimeout(refresh,
+            POST_START_CACHE_REFRESH_DELAYS_MS[attempt]);
     }
 
     getForegroundMessageBuilder() {
@@ -676,8 +830,8 @@ class Watchdrip {
         });
 
         this.bgTrendImageWidget.setProperty(prop.SRC, bgObj.getArrowResource());
+        this.updateAgePresentation();
         const staleReasons = this.watchdripData.getBgStaleReasons();
-        this.bgStaleLine.setProperty(prop.VISIBLE, staleReasons.length > 0);
         if (staleReasons.length > 0) {
             const age = this.watchdripData.getBgAgeMs();
             uiLog('BG_STALE', {
@@ -715,13 +869,23 @@ class Watchdrip {
     readInfoResult() {
         const result = this.infoFile.fetchJSONResult();
         const data = result.data;
-        if (data) {
+        if (data && data.bg && typeof data.bg === 'object') {
             debug.log("data was read");
+            const bgTime = data.bg.time == null ? '' : String(data.bg.time);
+            const statusNow = data.status && data.status.now != null
+                ? String(data.status.now)
+                : '';
+            const snapshotKey = [bgTime, statusNow].join('|');
+            const changed = this.cacheSnapshotKey !== snapshotKey;
+            this.cacheSnapshotKey = snapshotKey;
             this.watchdripData.setData(data);
             this.watchdripData.updateTimeDiff();
-            return { ok: true, reason: '' };
+            return { ok: true, reason: '', changed, snapshotKey };
         }
-        return { ok: false, reason: result.reason || 'missing' };
+        return {
+            ok: false,
+            reason: result.reason || (data ? 'missing_bg' : 'missing'),
+        };
     }
 
     readInfo() {
@@ -799,8 +963,11 @@ class Watchdrip {
     }
 
     onDestroy() {
+        this.destroyed = true;
         this.cancelCacheReadRetry();
+        this.cancelCacheRefresh();
         this.conf.save();
+        this.stopAgeRefresh();
         this.stopDataUpdates();
         if (this.foregroundMessageBuilder) {
             this.foregroundMessageBuilder.disConnect();
@@ -855,5 +1022,6 @@ Page({
         if (watchdrip) {
             watchdrip.onDestroy();
         }
+        watchdrip = null;
     },
 });

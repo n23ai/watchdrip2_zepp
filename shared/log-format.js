@@ -33,8 +33,8 @@ export function formatLogLine(tag, component, event, fields = {}, timestamp = Da
     event,
   ]
   const order = [
-    'run', 'tick', 'request', 'prior', 'priorError', 'code',
-    'value', 'unit', 'stale', 'ms', 'bytes', 'age', 'ageSec',
+    'run', 'tick', 'request', 'stage', 'errorCode', 'prior', 'priorError', 'code',
+    'value', 'unit', 'stale', 'measuredAt', 'serverNow', 'ms', 'bytes', 'age', 'ageSec',
     'attempt', 'reason', 'source', 'detail', 'error',
   ]
   const printed = {}
@@ -75,5 +75,14 @@ export function summarizeInfo(info) {
     fields.unit = status.isMgdl ? 'mg/dL' : 'mmol/L'
   }
   if (bg && bg.isStale !== undefined) fields.stale = bg.isStale ? 1 : 0
+  if (bg && Number.isFinite(Number(bg.time))) {
+    fields.measuredAt = formatLogTime(Number(bg.time)).replace(/ /g, '_')
+  }
+  if (status && Number.isFinite(Number(status.now))) {
+    fields.serverNow = formatLogTime(Number(status.now)).replace(/ /g, '_')
+  }
+  if (bg && status && Number.isFinite(Number(bg.time)) && Number.isFinite(Number(status.now))) {
+    fields.ageSec = Math.max(0, Math.floor((Number(status.now) - Number(bg.time)) / 1000))
+  }
   return fields
 }
