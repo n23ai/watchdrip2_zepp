@@ -10,30 +10,22 @@ install -t common
 [WARNING] In order to achieve better display effects on Zepp OS
 [WARNING] The minimum width and height of the image /Users/nikolaj/Documents/dev/zepp/watchdrip2_zepp/assets/common/icon.png needs to be 248
 [WARNING] Please checkout the Design Guide: https://docs.zepp.com/docs/designs/visual/icons/
-[ROLLUP] Transform 6 JS files in 426ms
+[ROLLUP] Transform 6 JS files in 459ms
 [PNG2TGA] Converting PNG files...
 [PNG2TGA] 18 files, 45ms, done!
 [QJSC] Compiling JS files...
-[QJSC] 4 files, 24ms, done!
+[QJSC] 4 files, 25ms, done!
 [PNG2TGA] Converting PNG files...
 [PNG2TGA] 18 files, 35ms, done!
 [QJSC] Compiling JS files...
-[QJSC] 4 files, 37ms, done!
+[QJSC] 4 files, 25ms, done!
 [PNG2TGA] Converting PNG files...
-[PNG2TGA] 18 files, 46ms, done!
+[PNG2TGA] 18 files, 35ms, done!
 [QJSC] Compiling JS files...
-[QJSC] 4 files, 26ms, done!
+[QJSC] 4 files, 25ms, done!
 [ℹ] getting package...
 bridge$ [8D[8C[ℹ] Start install lite app
-[ℹ] [DEBUG-1:27:44 AM.903] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464349,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.mobileAppStore\",\"action\":\"eventHappened\"},\"params\":{\"data\":{\"appId\":43107},\"type\":\"appInstalled\",\"target\":\"zeppAppStore\",\"timestamp\":1783722464346}}]"}}
-[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"app.sapp.page\",\"action\":\"close\"},\"params\":{\"appId\":43107}}]"}}
-[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.system\",\"action\":\"eventHappened\"},\"params\":{\"type\":\"sideServiceClosed\",\"data\":{\"appId\":43107}}}]"}}
-[ℹ] [DEBUG-1:27:44 AM.906] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":4,"appId":-1,"timestamp":1783722464352,"scope":"side-4.1.0-release.6-402","name":"process-mgr","tag":"-","message":"App LifeCycle Status: Destroy. ProcessInfo=appId[43107] processId[ef9b78f9e5e72-1abc685bd92bb0-e70eb816177d9-1410777f07ebbb] devicePort[0] sidePort[1048]"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464357,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"response [13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec\",\"result\":{\"message\":\"success\"}}"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464356,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"request [13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"13fed64c155ddf-66aa3177f0bc6-599e355f46d8d-7cc5f4e3d3cec\",\"method\":{\"module\":\"main.heartBeat.heartBeatInfo\",\"action\":\"close\"},\"params\":{\"timeout\":4000}}"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464358,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}]"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1783722464359,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"result\":{\"success\":true}}]"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464360,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"response [6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"result\":{\"success\":true}}"}}
-[ℹ] [DEBUG-1:27:44 AM.907] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1783722464360,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"request [6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"6b6901687d64a-16bc55af63ba1b-9adba33b000ed-1156360ae971e3\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}"}}
+[ℹ] [DEBUG-1:06:37 PM.808] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1784801197546,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1007:1007.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.mobileAppStore\",\"action\":\"eventHappened\"},\"params\":{\"data\":{\"appId\":43107},\"type\":\"appInstalled\",\"target\":\"zeppAppStore\",\"timestamp\":1784801197545}}]"}}
+[ℹ] [DEBUG-1:06:37 PM.811] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":4,"appId":-1,"timestamp":1784801197547,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"process[43107] is not existed, cant close"}}
 [ℹ] Install lite app result: success
 exit

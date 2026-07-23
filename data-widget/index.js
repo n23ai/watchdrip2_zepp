@@ -32,9 +32,17 @@ function getCardMetrics() {
   const size = getAppWidgetSize()
   const cardWidth = size && size.w ? size.w : px(400)
   const cardHeight = size && size.h ? size.h : px(220)
-  const innerX = clamp(px(8), 0, Math.floor(cardWidth / 2))
+  const cardRadius = size && typeof size.radius === 'number' && size.radius > 0
+    ? size.radius
+    : px(30)
+  const cardX = size && typeof size.margin === 'number' && size.margin > 0
+    ? size.margin
+    : px(40)
+
+  const innerMarginX = px(16)
+  const innerX = cardX + innerMarginX
   const innerY = clamp(px(8), 0, Math.floor(cardHeight / 2))
-  const innerWidth = Math.max(px(180), cardWidth - innerX * 2)
+  const innerWidth = Math.max(px(180), cardWidth - innerMarginX * 2)
   const innerHeight = Math.max(px(120), cardHeight - innerY * 2)
 
   const valueWidth = px(130)
@@ -48,8 +56,10 @@ function getCardMetrics() {
   const graphHeight = Math.max(px(28), barY - graphY - px(8))
 
   return {
+    cardX,
     cardWidth,
     cardHeight,
+    cardRadius,
     innerX,
     innerY,
     innerWidth,
@@ -125,8 +135,10 @@ AppWidget({
     try {
       const metrics = getCardMetrics()
       const {
+        cardX,
         cardWidth,
         cardHeight,
+        cardRadius,
         innerX,
         innerY,
         innerWidth,
@@ -153,8 +165,10 @@ AppWidget({
       this.state.graphHeight = graphHeight
 
       widgetLog('WIDGET_LAYOUT', {
+        cardX,
         width: cardWidth,
         height: cardHeight,
+        cardRadius,
         innerX,
         innerY,
         innerWidth,
@@ -163,11 +177,11 @@ AppWidget({
       })
 
       createWidget(widget.FILL_RECT, {
-        x: 0,
+        x: cardX,
         y: 0,
         w: cardWidth,
         h: cardHeight,
-        radius: px(30),
+        radius: cardRadius,
         color: CARD_BG,
       })
 
@@ -504,7 +518,8 @@ AppWidget({
     const graphStart = numberValue(graph.start)
     const graphEnd = numberValue(graph.end)
     const xMin = graphStart !== null ? graphStart : Math.min(...xValues)
-    const xMax = graphEnd !== null && graphEnd > xMin ? graphEnd : Math.max(...xValues)
+    const maxDataX = Math.max(...xValues)
+    const xMax = maxDataX > xMin ? maxDataX : (graphEnd !== null && graphEnd > xMin ? graphEnd : xMin + 1)
     if (!(xMax > xMin)) return
 
     const isMgdl = this.state.watchdripData.getStatus().isMgdl === true

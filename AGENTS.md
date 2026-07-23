@@ -24,6 +24,7 @@ Based on extensive real-watch testing, you MUST follow this "Golden path" archit
 2. **System Ticks**: Inside the continuous service, use `Time.onPerMinute()` to trigger cyclical background work (e.g., BLE fetches).
 3. **Read-Only Widgets**: Do NOT attempt to schedule alarms, timeouts, or perform BLE fetches from the widget context. The OS blocks wake-mechanisms initiated by widgets. Widgets must be strictly read-only, simply reading `info.json` and rendering the UI on `onResume`.
 4. **Stale Recovery / Watchdogs**: The background service must be resilient. If a BLE fetch hangs, a promise is unhandled, or a callback is missed, the service must not stay permanently locked (e.g., stuck with `fetchInFlight = true`). Implement watchdogs to clear stale state on subsequent `onPerMinute` ticks so the cycle continues.
+5. **Widget Layout & Alignment**: For shortcut card widgets (`data-widget/index.js`), use `getAppWidgetSize()` metrics: set card background at `x: size.margin` (`cardX = px(40)`) with `w: size.w` (`cardWidth = px(400)`), content at `innerX = cardX + px(16)` and `innerWidth = cardWidth - px(32)`. Compute canvas graph `xMax` via `Math.max(...xValues)` to fill the card completely to the right boundary.
 
 ## Build, Test, and Development Commands
 
