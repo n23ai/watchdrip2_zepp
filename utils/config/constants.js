@@ -1,11 +1,11 @@
 import {MINUTE_IN_MS, SECOND_IN_MS} from "../../shared/date";
 
-export const DATA_TIMER_UPDATE_INTERVAL_MS = SECOND_IN_MS * 10;
+export const DATA_TIMER_UPDATE_INTERVAL_MS = SECOND_IN_MS * 30;
 export const DATA_UPDATE_INTERVAL_MS = MINUTE_IN_MS;
 
 export const DATA_STALE_TIME_MS = MINUTE_IN_MS * 2;
 
-export const SERVER_URL = "http://localhost:29863/";
+export const SERVER_URL = "http://127.0.0.1:29863/";
 export const SERVER_INFO_URL = "info.json";
 export const SERVER_PUT_TREATMENTS_URL = "add_treatments";
 export const SERVER_IMAGE_URL = "image.png";
@@ -15,8 +15,6 @@ export const Commands = {
   putTreatment: "CMD_PUT_TREATMENTS",
   getImg: "CMD_GET_IMG",
 };
-
-export const XDRIP_UPDATE_INTERVAL_MS = MINUTE_IN_MS * 5  + SECOND_IN_MS * 30;
 
 export const ALARM_UPDATE_INTERVAL = 60; //(in seconds)
 

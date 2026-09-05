@@ -4,10 +4,11 @@ import { WatchdripData } from '../utils/watchdrip/watchdrip-data'
 import { WF_INFO_FILE } from '../utils/config/global-constants'
 import { createWidget, getAppWidgetSize, widget, prop, align, text_style } from '@zos/ui'
 import { px, log } from '@zos/utils'
-import { formatLogLine, summarizeInfo } from '../shared/log-format'
+import { formatLogLine, summarizeInfo, formatSugarLog } from '../shared/log-format'
+import { getAllAppServices, start as startAppService } from '@zos/app-service'
 
 const logger = log.getLogger('watchdrip_widget')
-const AGE_REFRESH_MS = 60000
+const AGE_REFRESH_MS = 3000
 const MAX_GRAPH_POINTS = 48
 
 const CARD_BG = 0x3a3a3a
@@ -17,11 +18,41 @@ const COLOR_LOW = 0xff5252
 const COLOR_IN_RANGE = 0x4ddd73
 const COLOR_HIGH = 0xffcc4d
 const COLOR_VERY_HIGH = 0xff5252
-const COLOR_TARGET = 0x4c5d54
+const COLOR_TARGET = 0x778877
 const COLOR_PREDICT = 0x8b9aa8
 
 function widgetLog(event, fields = {}) {
   logger.log(formatLogLine('WD_WIDGET', 'CARD', event, fields))
+}
+
+let lastColdStartCheck = 0
+function ensureBackgroundService() {
+  const now = Date.now()
+  if (now - lastColdStartCheck < 5000) return
+  lastColdStartCheck = now
+  try {
+    const services = getAllAppServices() || []
+    const isRunning = services.some(s => String(s).replace(/\.js$/, '') === 'app-service/index')
+    if (!isRunning) {
+      widgetLog('WIDGET_STARTING_SERVICE')
+      console.log('watchdrip widget: Service not running, initiating cold start')
+      logger.log('Service not running, initiating cold start')
+      const ret = startAppService({
+        file: 'app-service/index',
+        param: 'mode=continuous&source=widget_cold_start',
+        complete_func: (info) => {
+          const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info'
+          console.log('watchdrip widget: startAppService complete_func result=' + res)
+          logger.log('startAppService complete_func result=' + res)
+        }
+      })
+      console.log('watchdrip widget: startAppService ret=' + ret)
+      logger.log('startAppService ret=' + ret)
+    }
+  } catch (e) {
+    console.log('watchdrip widget: ensureBackgroundService error: ' + e)
+    logger.error('widget ensureBackgroundService error: ' + e)
+  }
 }
 
 function clamp(value, min, max) {
@@ -321,10 +352,11 @@ AppWidget({
   onResume() {
     widgetLog('WIDGET_RESUME')
     try {
+      ensureBackgroundService()
       this.readAndRender()
       this.stopAgeTimer()
       this.state.ageTimer = setInterval(() => {
-        this.updateSubtitle()
+        this.readAndRender()
       }, AGE_REFRESH_MS)
     } catch (e) {
       widgetLog('WIDGET_RESUME_ERROR', { reason: 'resume' })
@@ -351,13 +383,29 @@ AppWidget({
 
   readAndRender() {
     try {
-      const result = this.state.infoFile && this.state.infoFile.fetchJSONResult()
+      if (!this.state.infoFile) {
+        this.state.infoFile = new Path('full', WF_INFO_FILE)
+      }
+      if (!this.state.watchdripData) {
+        if (!this.state.timeSensor) {
+          this.state.timeSensor = new Time()
+        }
+        this.state.watchdripData = new WatchdripData(this.state.timeSensor)
+      }
+      const result = this.state.infoFile.fetchJSONResult()
       const data = result && result.data
       if (!data || !data.bg || typeof data.bg !== 'object') {
-        widgetLog('WIDGET_CACHE_READ_FAILED', {
-          reason: data ? 'invalid_json' : ((result && result.reason) || 'missing'),
-        })
-        this.renderNoData()
+        const failReason = data ? 'invalid_json' : ((result && result.reason) || 'missing')
+        widgetLog('WIDGET_CACHE_READ_FAILED', { reason: failReason })
+        const logLine = formatSugarLog('[WD_WIDGET CARD READ]', null, { status: 'FAILED', reason: failReason })
+        console.log(logLine)
+        logger.log(logLine)
+        const currentBg = this.state.watchdripData && this.state.watchdripData.getBg()
+        if (!currentBg || !currentBg.isHasData()) {
+          this.renderNoData()
+        } else {
+          this.updateSubtitle()
+        }
         return
       }
 
@@ -367,11 +415,21 @@ AppWidget({
         graph: data.graph ? 1 : 0,
         ...summarizeInfo(data),
       })
+      const sugarLogLine = formatSugarLog('[WD_WIDGET CARD READ]', data, { status: 'OK' })
+      console.log(sugarLogLine)
+      logger.log(sugarLogLine)
       this.renderData()
     } catch (e) {
       widgetLog('WIDGET_CACHE_READ_FAILED', { reason: 'read_error' })
+      const errorLogLine = formatSugarLog('[WD_WIDGET CARD READ]', null, { status: 'ERROR', error: String(e) })
+      console.log(errorLogLine)
       logger.error('widget read error: ' + e)
-      this.renderNoData()
+      const currentBg = this.state.watchdripData && this.state.watchdripData.getBg()
+      if (!currentBg || !currentBg.isHasData()) {
+        this.renderNoData()
+      } else {
+        this.updateSubtitle()
+      }
     }
   },
 
@@ -504,67 +562,114 @@ AppWidget({
       .filter((name) => lineMap[name])
       .map((name) => ({name, points: lineMap[name]}))
     const predictSeries = lineMap.predict ? [{name: 'predict', points: lineMap.predict}] : []
-    const allSeries = dataSeries.concat(targetSeries, predictSeries)
-    widgetLog('WIDGET_GRAPH_SERIES', {
-      series: allSeries.length
-        ? allSeries.map((series) => series.name + ':' + series.points.length).join(',')
-        : 'none',
-    })
-    const allPoints = []
-    allSeries.forEach((series) => series.points.forEach((point) => allPoints.push(point)))
-    if (allPoints.length < 2) return
+    const dataAndPredictSeries = dataSeries.concat(predictSeries)
+    const dataPoints = []
+    dataAndPredictSeries.forEach((series) => series.points.forEach((point) => dataPoints.push(point)))
 
-    const xValues = allPoints.map((point) => numberValue(point[0])).filter((value) => value !== null)
-    const graphStart = numberValue(graph.start)
-    const graphEnd = numberValue(graph.end)
-    const xMin = graphStart !== null ? graphStart : Math.min(...xValues)
-    const maxDataX = Math.max(...xValues)
-    const xMax = maxDataX > xMin ? maxDataX : (graphEnd !== null && graphEnd > xMin ? graphEnd : xMin + 1)
-    if (!(xMax > xMin)) return
-
-    const isMgdl = this.state.watchdripData.getStatus().isMgdl === true
+    const isMgdl = this.state.watchdripData ? (this.state.watchdripData.getStatus().isMgdl === true) : false
     const baseMin = isMgdl ? 40 : 2
     const baseMax = isMgdl ? 320 : 18
-    const yValues = allPoints.map((point) => numberValue(point[1])).filter((value) => value !== null)
+
+    const xValues = dataPoints.map((point) => numberValue(point[0])).filter((value) => value !== null)
+    const nowMs = Date.now()
+    const graphStart = graph ? numberValue(graph.start) : null
+    const graphEnd = graph ? numberValue(graph.end) : null
+    const xMin = graphStart !== null ? graphStart : (xValues.length ? Math.min(...xValues) : nowMs - 3 * 3600 * 1000)
+    const maxDataX = xValues.length ? Math.max(...xValues) : nowMs
+    const xMax = maxDataX > xMin ? maxDataX : (graphEnd !== null && graphEnd > xMin ? graphEnd : xMin + 3600 * 1000)
+
+    const yValues = dataPoints.map((point) => numberValue(point[1])).filter((value) => value !== null)
     const yMin = Math.min(baseMin, ...yValues)
     const yMax = Math.max(baseMax, ...yValues)
-    if (!(yMax > yMin)) return
+    if (!(yMax > yMin) || !(xMax > xMin)) return
 
-    const totalDataPoints = dataSeries.reduce((sum, series) => sum + series.points.length, 0)
-    const drawSeries = (series, color, width) => {
-      const budget = Math.max(2, Math.floor(MAX_GRAPH_POINTS * series.points.length /
-        Math.max(1, totalDataPoints)))
-      const points = samplePoints(series.points, budget)
-      this.state.graphCanvas.setPaint({color, line_width: width})
-      for (let i = 1; i < points.length; i++) {
-        const previous = this.toCanvasPoint(points[i - 1], xMin, xMax, yMin, yMax)
-        const current = this.toCanvasPoint(points[i], xMin, xMax, yMin, yMax)
-        if (!previous || !current) continue
+    const drawThresholdLine = (valY, color) => {
+      const pt = this.toCanvasPoint([xMin, valY], xMin, xMax, yMin, yMax)
+      if (!pt) return
+      try {
+        const yPos = Math.round(pt.y)
+        this.state.graphCanvas.setPaint({ color, line_width: px(1) })
         this.state.graphCanvas.drawLine({
-          x1: previous.x,
-          y1: previous.y,
-          x2: current.x,
-          y2: current.y,
+          x1: 0,
+          y1: yPos,
+          x2: this.state.contentWidth,
+          y2: yPos,
           color,
         })
-      }
-    }
-
-    const drawSafeSeries = (series, color, width) => {
-      try {
-        drawSeries(series, color, width)
       } catch (e) {
-        widgetLog('WIDGET_GRAPH_SERIES_ERROR', { reason: series.name })
+        widgetLog('WIDGET_THRESHOLD_ERROR')
       }
     }
 
-    targetSeries.forEach((series) => drawSafeSeries(series, COLOR_TARGET, px(1)))
+    let targetLowVal = isMgdl ? 70 : 3.9
+    let targetHighVal = isMgdl ? 180 : 10.0
+
+    if (lineMap.lineLow && lineMap.lineLow[0]) {
+      const rawLow = numberValue(lineMap.lineLow[0][1])
+      if (rawLow !== null) {
+        targetLowVal = (!isMgdl && rawLow > 30) ? (rawLow / 18.018) : rawLow
+      }
+    }
+    if (lineMap.lineHigh && lineMap.lineHigh[0]) {
+      const rawHigh = numberValue(lineMap.lineHigh[0][1])
+      if (rawHigh !== null) {
+        targetHighVal = (!isMgdl && rawHigh > 30) ? (rawHigh / 18.018) : rawHigh
+      }
+    }
+
+    drawThresholdLine(targetLowVal, COLOR_TARGET)
+    drawThresholdLine(targetHighVal, COLOR_TARGET)
+
+    // Build unified timeline: merge all data points with their category
+    const allDataPoints = []
     dataSeries.forEach((series) => {
-      const color = series.name === 'low' ? COLOR_LOW :
-        (series.name === 'high' ? COLOR_HIGH : COLOR_IN_RANGE)
-      drawSafeSeries(series, color, px(3))
+      series.points.forEach((pt) => {
+        allDataPoints.push({ t: numberValue(pt[0]), v: numberValue(pt[1]), cat: series.name })
+      })
     })
-    predictSeries.forEach((series) => drawSafeSeries(series, COLOR_PREDICT, px(1)))
+    allDataPoints.sort((a, b) => a.t - b.t)
+
+    if (allDataPoints.length >= 2) {
+      const sampled = samplePoints(
+        allDataPoints.map((p) => [p.t, p.v]),
+        MAX_GRAPH_POINTS
+      )
+      // Restore category for each sampled point by matching timestamp
+      const sampledWithCat = sampled.map((pt) => {
+        let best = allDataPoints[0]
+        let bestDist = Math.abs(pt[0] - best.t)
+        for (let j = 1; j < allDataPoints.length; j++) {
+          const dist = Math.abs(pt[0] - allDataPoints[j].t)
+          if (dist < bestDist) { best = allDataPoints[j]; bestDist = dist }
+        }
+        return { t: pt[0], v: pt[1], cat: best.cat }
+      })
+
+      for (let i = 1; i < sampledWithCat.length; i++) {
+        const prev = this.toCanvasPoint([sampledWithCat[i - 1].t, sampledWithCat[i - 1].v], xMin, xMax, yMin, yMax)
+        const curr = this.toCanvasPoint([sampledWithCat[i].t, sampledWithCat[i].v], xMin, xMax, yMin, yMax)
+        if (!prev || !curr) continue
+        const cat = sampledWithCat[i].cat
+        const color = cat === 'low' ? COLOR_LOW : (cat === 'high' ? COLOR_HIGH : COLOR_IN_RANGE)
+        this.state.graphCanvas.setPaint({ color, line_width: px(3) })
+        this.state.graphCanvas.drawLine({ x1: prev.x, y1: prev.y, x2: curr.x, y2: curr.y, color })
+      }
+    }
+
+    // Draw predict series separately (dashed style, thinner)
+    if (predictSeries.length > 0) {
+      const drawSeries = (series, color, width) => {
+        const points = samplePoints(series.points, Math.max(2, Math.floor(MAX_GRAPH_POINTS / 4)))
+        this.state.graphCanvas.setPaint({ color, line_width: width })
+        for (let i = 1; i < points.length; i++) {
+          const previous = this.toCanvasPoint(points[i - 1], xMin, xMax, yMin, yMax)
+          const current = this.toCanvasPoint(points[i], xMin, xMax, yMin, yMax)
+          if (!previous || !current) continue
+          this.state.graphCanvas.drawLine({ x1: previous.x, y1: previous.y, x2: current.x, y2: current.y, color })
+        }
+      }
+      predictSeries.forEach((series) => drawSeries(series, COLOR_PREDICT, px(1)))
+    }
   },
 
   toCanvasPoint(point, xMin, xMax, yMin, yMax) {

@@ -104,12 +104,34 @@ export class Path {
 
     fetchText(limit = Infinity) {
         try {
-            return readFileSync({
+            const st = this.stat();
+            const res = readFileSync({
                 path: this.relativePath,
                 options: { encoding: 'utf8' }
             });
-        } catch (e) {
+            console.log('[PATH fetchText] path=' + this.relativePath + ' stat_size=' + (st ? st.size : 'undef') + ' res_type=' + typeof res + ' len=' + (res ? (res.length || res.byteLength) : 0));
+            if (typeof res === 'string') {
+                return res;
+            }
+            if (res) {
+                return FsTools.ab2str(res);
+            }
             return null;
+        } catch (e) {
+            console.log('[PATH fetchText error] path=' + this.relativePath + ' err=' + e);
+            try {
+                const raw = readFileSync({
+                    path: this.relativePath
+                });
+                console.log('[PATH fallback] raw_type=' + typeof raw + ' len=' + (raw ? (raw.length || raw.byteLength) : 0));
+                if (raw && typeof raw !== 'string') {
+                    return FsTools.ab2str(raw);
+                }
+                return raw || null;
+            } catch (e2) {
+                console.log('[PATH fallback error] path=' + this.relativePath + ' err=' + e2);
+                return null;
+            }
         }
     }
 
@@ -117,15 +139,27 @@ export class Path {
         return this.fetchJSONResult().data;
     }
 
-    // UI readers need a safe reason when a snapshot is temporarily absent or
-    // incomplete while another runtime writes it.
     fetchJSONResult() {
-        const text = this.fetchText();
+        let text = this.fetchText();
         if (!text) return { data: null, reason: 'missing' };
         try {
-            return { data: JSON.parse(text), reason: '' };
+            let data = typeof text === 'string' ? JSON.parse(text) : text;
+            if (typeof data === 'string') {
+                data = JSON.parse(data);
+            }
+            return { data: data, reason: '' };
         } catch (e) {
-            return { data: null, reason: 'invalid_json' };
+            text = this.fetchText();
+            if (!text) return { data: null, reason: 'missing' };
+            try {
+                let data = typeof text === 'string' ? JSON.parse(text) : text;
+                if (typeof data === 'string') {
+                    data = JSON.parse(data);
+                }
+                return { data: data, reason: '' };
+            } catch (err) {
+                return { data: null, reason: 'invalid_json' };
+            }
         }
     }
 
@@ -143,23 +177,62 @@ export class Path {
     }
 
     overrideWithText(text) {
+        if (typeof text !== 'string') {
+            text = String(text !== undefined && text !== null ? text : '');
+        }
         try {
-            // info.json/config.json are small cache/state files. Zepp OS
-            // writeFileSync replaces an existing file, and this avoids the
-            // App Service rename race observed on the watch firmware.
+            const buf = FsTools.str2ab(text);
+            const tmpPath = this.relativePath + '.tmp';
+            
+            // 1. Write to temporary file as binary ArrayBuffer
             writeFileSync({
-                path: this.relativePath,
-                data: text,
-                options: { encoding: 'utf8' }
+                path: tmpPath,
+                data: buf
             });
-            return true;
+            
+            // 2. Verify temporary file was written
+            const st = statSync({ path: tmpPath });
+            const writtenSize = st ? st.size : 0;
+            console.log('[PATH overrideWithText] tmp=' + tmpPath + ' target=' + this.relativePath + ' bufLen=' + buf.byteLength + ' stat_size=' + writtenSize);
+            
+            if (writtenSize > 0 || buf.byteLength === 0) {
+                try {
+                    rmSync({ path: this.relativePath });
+                } catch (eRm) {}
+                const renRes = renameSync({
+                    oldPath: tmpPath,
+                    newPath: this.relativePath
+                });
+                console.log('[PATH overrideWithText] renameSync=' + renRes);
+                return true;
+            } else {
+                console.log('[PATH overrideWithText] tmp size 0, writing directly');
+                writeFileSync({
+                    path: this.relativePath,
+                    data: buf
+                });
+                return true;
+            }
         } catch (e) {
-            console.log("overrideWithText error", e);
-            return false;
+            console.log('[PATH overrideWithText error] ' + e);
+            try {
+                const buf = FsTools.str2ab(text);
+                writeFileSync({
+                    path: this.relativePath,
+                    data: buf
+                });
+                return true;
+            } catch (e2) {
+                console.log('[PATH overrideWithText direct error] ' + e2);
+                return false;
+            }
         }
     }
 
     overrideWithJSON(data) {
+        if (typeof data === 'string') {
+            return this.overrideWithText(data);
+        }
         return this.overrideWithText(JSON.stringify(data));
     }
 
@@ -245,15 +318,48 @@ export class FsTools {
     }
 
     static ab2str(buf) {
-        return String.fromCharCode.apply(null, new Uint8Array(buf));
+        if (!buf) return '';
+        const uint8 = new Uint8Array(buf);
+        const len = uint8.length;
+        if (len === 0) return '';
+        let result = '';
+        const chunkSize = 1024;
+        for (let i = 0; i < len; i += chunkSize) {
+            const sub = uint8.subarray(i, Math.min(i + chunkSize, len));
+            result += String.fromCharCode.apply(null, sub);
+        }
+        return result;
     }
 
     static str2ab(str) {
-        var buf = new ArrayBuffer(str.length)
-        var bufView = new Uint8Array(buf)
-        for (var i = 0, strLen = str.length; i < strLen; i++) {
-            bufView[i] = str.charCodeAt(i)
+        if (!str) return new ArrayBuffer(0);
+        let utf8 = [];
+        for (let i = 0; i < str.length; i++) {
+            let charcode = str.charCodeAt(i);
+            if (charcode < 0x80) utf8.push(charcode);
+            else if (charcode < 0x800) {
+                utf8.push(0xc0 | (charcode >> 6), 
+                          0x80 | (charcode & 0x3f));
+            }
+            else if (charcode < 0xd800 || charcode >= 0xe000) {
+                utf8.push(0xe0 | (charcode >> 12), 
+                          0x80 | ((charcode >> 6) & 0x3f), 
+                          0x80 | (charcode & 0x3f));
+            }
+            else {
+                i++;
+                charcode = 0x10000 + (((charcode & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
+                utf8.push(0xf0 | (charcode >> 18), 
+                          0x80 | ((charcode >> 12) & 0x3f), 
+                          0x80 | ((charcode >> 6) & 0x3f), 
+                          0x80 | (charcode & 0x3f));
+            }
         }
-        return buf
+        const buf = new ArrayBuffer(utf8.length);
+        const bufView = new Uint8Array(buf);
+        for (let i = 0; i < utf8.length; i++) {
+            bufView[i] = utf8[i];
+        }
+        return buf;
     }
 }

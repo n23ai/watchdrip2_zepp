@@ -31,6 +31,9 @@
         },
         "app-service": {
           "services": ["app-service/index"]
+        },
+        "app-event": {
+          "path": "app-service/index"
         }
       },
       "platforms": [
@@ -86,6 +89,9 @@
         },
         "app-service": {
           "services": ["app-service/index"]
+        },
+        "app-event": {
+          "path": "app-service/index"
         },
         "setting": {
           "path": "setting/index"

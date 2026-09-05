@@ -52,15 +52,15 @@ else if (DEVICE_TYPE === "round"){
 }
 
 export const DEBUG_TEXT = {
-  x: 50,
-  y: 50,
-  w: 250,
-  h: 450,
-  text_size: 12,
+  x: px(35),
+  y: px(290),
+  w: DEVICE_WIDTH - px(70),
+  h: DEVICE_HEIGHT - px(340),
+  text_size: px(16),
   char_space: 0,
   color: Colors.white,
   text: "",
-  text_style: text_style.NONE,
+  text_style: text_style.WRAP,
   align_h: align.LEFT,
   align_v: align.TOP,
 };

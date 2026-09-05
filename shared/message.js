@@ -210,16 +210,21 @@ export class MessageBuilder extends EventBus {
 
   connect(cb) {
     if (cb) this.whenReady(cb)
-    this.on('message', (message) => {
-      this.onMessage(message)
-    })
-
-    this.ble &&
-      this.ble.createConnect((index, data, size) => {
-        // logger.warn('[RAW] [R] receive index=>%d size=>%d bin=>%s', index, size, this.bin2hex(data))
-        this.onFragmentData(data)
+    if (!this._connected) {
+      this._connected = true
+      this.on('message', (message) => {
+        this.onMessage(message)
       })
 
+      this.ble &&
+        this.ble.createConnect((index, data, size) => {
+          this.onFragmentData(data)
+        })
+    }
+
+    if (this.isDevice) {
+      this.markReady()
+    }
     this.sendShake()
   }
 
@@ -244,10 +249,9 @@ export class MessageBuilder extends EventBus {
   }
 
   disConnect(cb) {
-    // logger.debug('app ble disconnect')
-    this.sendClose()
+    // Do NOT sendClose() or ble.disConnect() — the companion process
+    // is shared with the background app-service.
     this.off('message')
-    this.ble && this.ble.disConnect()
     this.ready = false
     this.readyCallbacks = []
     cb && cb(this)
@@ -761,24 +765,32 @@ export class MessageBuilder extends EventBus {
       }
     } else if (
       data.flag === MessageFlag.App &&
-      data.type === MessageType.Data &&
-      data.port2 === this.appSidePort
+      (data.type === MessageType.Data || data.type === MessageType.DataWithSystemTool)
     ) {
+      if (this.appSidePort === 0 || (data.port2 && this.appSidePort !== data.port2)) {
+        this.appSidePort = data.port2
+      }
+      if (!this.ready && this.isDevice) {
+        this.markReady()
+      }
       this.emit('message', data.payload)
       this.emit('read', data)
     } else if (
       data.flag === MessageFlag.App &&
-      data.type === MessageType.DataWithSystemTool &&
-      data.port2 === this.appSidePort
+      data.type === MessageType.Log
     ) {
-      this.emit('message', data.payload)
-      this.emit('read', data)
-    } else if (
-      data.flag === MessageFlag.App &&
-      data.type === MessageType.Log &&
-      data.port2 === this.appSidePort
-    ) {
+      if (this.appSidePort === 0 || (data.port2 && this.appSidePort !== data.port2)) {
+        this.appSidePort = data.port2
+      }
       this.emit('log', data.payload)
+    } else if (
+      data.flag === MessageFlag.App &&
+      data.type === MessageType.Close
+    ) {
+      logger.warn('[MSG] Received Close from phone, resetting connection state. port2=%d', data.port2)
+      this.appSidePort = 0
+      this.ready = false
+      this.emit('close', data)
     } else {
       // logger.error('error appSidePort=>%d data=>%j', this.appSidePort, data)
     }
@@ -936,7 +948,13 @@ export class MessageBuilder extends EventBus {
 
     let cancelReady = null
     if (this.isDevice) {
-      cancelReady = this.whenReady(_requestCb)
+      if (this.ready) {
+        _requestCb()
+      } else {
+        cancelReady = this.whenReady(_requestCb)
+        // Re-send shake to nudge the connection in case the first one was lost
+        try { this.sendShake() } catch(e) {}
+      }
     } else {
       this.waitingShakePromise.then(_requestCb)
     }

@@ -34,7 +34,7 @@ export function formatLogLine(tag, component, event, fields = {}, timestamp = Da
   ]
   const order = [
     'run', 'tick', 'request', 'stage', 'errorCode', 'prior', 'priorError', 'code',
-    'value', 'unit', 'stale', 'measuredAt', 'serverNow', 'ms', 'bytes', 'age', 'ageSec',
+    'value', 'unit', 'stale', 'measuredAt', 'serverNow', 'serverLagSec', 'ms', 'bytes', 'age', 'ageSec',
     'attempt', 'reason', 'source', 'detail', 'error',
   ]
   const printed = {}
@@ -81,8 +81,29 @@ export function summarizeInfo(info) {
   if (status && Number.isFinite(Number(status.now))) {
     fields.serverNow = formatLogTime(Number(status.now)).replace(/ /g, '_')
   }
+  if (bg && Number.isFinite(Number(bg.time))) {
+    const ageMs = Math.max(0, Date.now() - Number(bg.time))
+    fields.ageSec = Math.floor(ageMs / 1000)
+    fields.ageMin = Math.floor(ageMs / 60000)
+  }
   if (bg && status && Number.isFinite(Number(bg.time)) && Number.isFinite(Number(status.now))) {
-    fields.ageSec = Math.max(0, Math.floor((Number(status.now) - Number(bg.time)) / 1000))
+    const lagMs = Math.max(0, Number(status.now) - Number(bg.time))
+    fields.serverLagSec = Math.floor(lagMs / 1000)
   }
   return fields
 }
+
+export function formatSugarLog(actionTag, info, extraFields = {}) {
+  const summary = summarizeInfo(info)
+  const fields = {
+    ...summary,
+    ...extraFields
+  }
+  const valStr = summary.value !== undefined ? summary.value : 'N/A'
+  const unitStr = summary.unit !== undefined ? summary.unit : ''
+  const ageStr = summary.ageMin !== undefined ? (summary.ageMin + 'm') : 'N/A'
+  const measuredStr = summary.measuredAt !== undefined ? summary.measuredAt : 'N/A'
+
+  return `${actionTag} | sugar=${valStr}${unitStr ? ' ' + unitStr : ''} measuredAt=${measuredStr} age=${ageStr} ${formatLogLine('WD', 'INFO', 'DATA', fields)}`
+}
+

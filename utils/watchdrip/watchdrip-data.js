@@ -23,11 +23,10 @@ export class WatchdripData {
     }
 
     updateTimeDiff() {
-        if (this.getStatus().now == null) {
-            this.timeDiff = 0;
-        } else {
-            this.timeDiff = this.timeSensor.getTime() - this.getStatus().now;
-        }
+        // Disabled time-shifting logic. When reading from cache, status.now is a timestamp from the past.
+        // Calculating skew against a past timestamp freezes the age at 'now'.
+        // Watch and phone time are synced via Zepp App, so timeDiff = 0 is safe and fixes the bug.
+        this.timeDiff = 0;
     }
 
     setData(data) {
@@ -35,23 +34,23 @@ export class WatchdripData {
         if (data['bg'] === undefined) {
             this.bg = BgData.createEmpty();
         } else {
-            this.bg = Object.assign(BgData.prototype, data['bg']);
+            this.bg = Object.assign(new BgData(), data['bg']);
         }
 
         if (data['status'] === undefined) {
             this.status = StatusData.createEmpty();
         } else {
-            this.status = Object.assign(StatusData.prototype, data['status']);
+            this.status = Object.assign(new StatusData(), data['status']);
         }
         if (data['treatment'] === undefined) {
             this.treatment = TreatmentData.createEmpty();
         } else {
-            this.treatment = Object.assign(TreatmentData.prototype, data['treatment']);
+            this.treatment = Object.assign(new TreatmentData(), data['treatment']);
         }
         if (data['pump'] === undefined) {
             this.pump = PumpData.createEmpty();
         } else {
-            this.pump = Object.assign(PumpData.prototype, data['pump']);
+            this.pump = Object.assign(new PumpData(), data['pump']);
         }
     }
 
@@ -88,7 +87,7 @@ export class WatchdripData {
         const timeInt = Number(time);
         if (!Number.isFinite(timeInt)) return null;
 
-        const now = Number(this.timeSensor.getTime());
+        const now = Date.now();
         const clockDiff = Number.isFinite(this.timeDiff) ? this.timeDiff : 0;
         if (!Number.isFinite(now)) return null;
 

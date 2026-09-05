@@ -78,6 +78,11 @@ function getServerUrl() {
   return url.endsWith('/') ? url : url + '/'
 }
 
+function getTimerType() {
+  const storage = getSettingsStorage()
+  return (storage && storage.getItem('timer_type')) || 'auto'
+}
+
 async function requestInfo(url, meta) {
   const startedAt = Date.now()
   addCritical('HTTP_START', meta)
@@ -87,7 +92,7 @@ async function requestInfo(url, meta) {
       setTimeout(() => reject(new Error('HTTP_TIMEOUT')), HTTP_TIMEOUT_MS)
     })
     const response = await Promise.race([fetchPromise, timeoutPromise])
-    if (!response.body) throw Error('NO_DATA')
+    if (!response || !response.body) throw Error('NO_DATA')
     const data = response.body
     addCritical('HTTP_OK', meta, {
       code: response.status || 200,
@@ -106,7 +111,8 @@ async function requestInfo(url, meta) {
 async function fetchInfo(ctx, url, meta) {
   const result = await requestInfo(url, meta)
   try {
-    ctx.response({ data: { result, meta } })
+    const timerType = getTimerType()
+    ctx.response({ data: { result, meta: { ...meta, timerType } } })
     addCritical('RESPONSE_ENQUEUED', meta, {
       code: result && result.error ? 'REMOTE_ERROR' : 'OK',
       ...summarizeInfo(result),
@@ -128,6 +134,7 @@ async function fetchRaw(ctx, url, meta) {
       setTimeout(() => reject(new Error('HTTP_TIMEOUT')), HTTP_TIMEOUT_MS)
     })
     const response = await Promise.race([fetchPromise, timeoutPromise])
+    if (!response || !response.body) throw Error('NO_DATA')
     ctx.response({ data: { result: response.body } })
     addCritical('RAW_HTTP_OK', meta, {
       code: response.status || 200,
@@ -153,6 +160,10 @@ AppSideService({
         storage.addListener('change', async ({ key }) => {
           if (key === 'trigger_clear') {
             logBuffer = []
+            persistLogs()
+          } else if (key === 'timer_type') {
+            const newType = storage.getItem('timer_type') || 'auto'
+            addCritical('TIMER_TYPE_CHANGED', {}, { code: String(newType) })
             persistLogs()
           } else if (key === 'trigger_upload') {
             const uploadUrl = storage.getItem('webhook_url') || 'http://127.0.0.1:29863/save_logs'
@@ -186,17 +197,25 @@ AppSideService({
         return
       }
 
-      const params = jsonRpc.params || ''
       const meta = jsonRpc.meta || {}
       addCritical('REQUEST_RECEIVED', meta, { code: jsonRpc.method || 'UNKNOWN' })
       const baseUrl = getServerUrl()
+      const { params = '' } = jsonRpc
+      
+      const constructUrl = (base, path, p) => {
+        let fullPath = base + path;
+        let urlWithParams = p ? fullPath + '?' + p : fullPath;
+        let sep = urlWithParams.includes('?') ? '&' : '?';
+        return urlWithParams + sep + 't=' + Date.now();
+      };
+
       switch (jsonRpc.method) {
         case Commands.getInfo:
-          return fetchInfo(ctx, baseUrl + SERVER_INFO_URL + '?' + params, meta)
+          return fetchInfo(ctx, constructUrl(baseUrl, SERVER_INFO_URL, params), meta)
         case Commands.getImg:
-          return fetchRaw(ctx, baseUrl + 'get_img.php?' + params, meta)
+          return fetchRaw(ctx, constructUrl(baseUrl, 'get_img.php', params), meta)
         case Commands.putTreatment:
-          return fetchRaw(ctx, baseUrl + SERVER_PUT_TREATMENTS_URL + '?' + params, meta)
+          return fetchRaw(ctx, constructUrl(baseUrl, SERVER_PUT_TREATMENTS_URL, params), meta)
         default:
           addCritical('REQUEST_UNKNOWN', meta, { code: 'UNKNOWN_METHOD' })
           persistLogs()

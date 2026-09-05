@@ -49,14 +49,15 @@ export class DebugText {
     }
 
     getTime() {
+        const now = new Date();
         return (
-            zeroPad(this.t.getHours()) +
+            zeroPad(now.getHours()) +
             ":" +
-            zeroPad(this.t.getMinutes()) +
+            zeroPad(now.getMinutes()) +
             ":" +
-            zeroPad(this.t.getSeconds()) +
+            zeroPad(now.getSeconds()) +
             "." +
-            zeroPad(this.t.getTime() % 1000, 4)
+            zeroPad(now.getMilliseconds(), 3)
         );
     }
 

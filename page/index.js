@@ -10,12 +10,12 @@ import {
     DATA_UPDATE_INTERVAL_MS,
     PROGRESS_ANGLE_INC,
     PROGRESS_UPDATE_INTERVAL_MS,
-    XDRIP_UPDATE_INTERVAL_MS,
 } from "../utils/config/constants";
 import {
     WATCHDRIP_ALARM_SETTINGS_DEFAULTS, WF_DIR,
     WF_INFO_FILE,
 } from "../utils/config/global-constants";
+import { formatSugarLog } from "../shared/log-format";
 import {
     BG_DELTA_TEXT,
     BG_STALE_RECT,
@@ -47,7 +47,7 @@ import {DEVICE_WIDTH} from "../utils/config/device";
 import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
 import { Time, Vibrator } from '@zos/sensor'
 import { getPackageInfo, queryPermission, requestPermission } from '@zos/app'
-import { getAllAppServices, start as startAppService } from '@zos/app-service'
+import { getAllAppServices, start as startAppService, stop as stopAppService } from '@zos/app-service'
 import { goBack, home } from '@zos/router'
 import { log, px } from '@zos/utils'
 import { setPageBrightTime, resetPageBrightTime, setWakeUpRelaunch } from '@zos/display'
@@ -63,7 +63,7 @@ const BG_SERVICE_RETRY_DELAY_MS = 2000;
 const BG_SERVICE_MAX_ATTEMPTS = 2;
 const CACHE_READ_RETRY_DELAYS_MS = [250, 750, 1500, 2500];
 const POST_START_CACHE_REFRESH_DELAYS_MS = [750, 1500, 3000, 5000, 10000, 25000, 45000, 65000];
-const AGE_REFRESH_INTERVAL_MS = 1000;
+const AGE_REFRESH_INTERVAL_MS = 30000;
 const {appId} = getPackageInfo();
 const ble = require('@zos/ble');
 
@@ -194,8 +194,25 @@ function startWatchdripBackgroundService(onReady, attempt = 1, run = 0) {
         bgPageLog('ENSURE_BEGIN', 'run=' + operationRun + ' attempt=' + attempt);
         const serviceList = getServiceList('LIST_BEFORE_START');
         if (serviceList && isWatchdripServiceRunning(serviceList)) {
-            bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt);
-            finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
+            let conf = new WatchdripConfig();
+            conf.read();
+            const isStale = (Date.now() - lastUpd) > 15 * 60 * 1000;
+            if (!isStale) {
+                bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt + ' age=' + Math.floor((Date.now() - lastUpd)/1000) + 's');
+                finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
+                return;
+            }
+            bgPageLog('SERVICE_STALE_REPAIR', 'run=' + operationRun + ' age=' + Math.floor((Date.now() - lastUpd)/1000) + 's -> stopping zombie service');
+            try {
+                if (typeof stopAppService === 'function') {
+                    stopAppService({ file: BG_SERVICE_FILE });
+                }
+            } catch (eStop) {
+                bgPageLog('STOP_STALE_ERROR', formatError(eStop));
+            }
+            setTimeout(() => {
+                invokeWatchdripServiceStart(onReady, attempt, operationRun);
+            }, 1000);
             return;
         }
         invokeWatchdripServiceStart(onReady, attempt, operationRun);
@@ -342,7 +359,7 @@ class Watchdrip {
             align_h: align.CENTER_H,
             align_v: align.CENTER_V,
             text_style: text_style.NONE,
-            text: 'BG: see bridge logs',
+            text: '',
         });
 
         if (this.conf.settings.disableUpdates) {
@@ -354,6 +371,7 @@ class Watchdrip {
                     watchdrip.schedulePostStartCacheRefresh();
                 }
             });
+            this.startDataUpdates();
         }
 
         createWidget(widget.BUTTON, {
@@ -416,7 +434,7 @@ class Watchdrip {
                     const key = this.configDataList[index].key
                     let val = this.conf.settings[key]
                     this.conf.settings[key] = !val;
-                    this.conf.settingsTime = this.timeSensor.getTime(); // upd settings time
+                    this.conf.settingsTime = Date.now(); // upd settings time
                     //update list
                     this.configScrollList.setProperty(prop.UPDATE_DATA, {
                         ...this.getConfigData(),
@@ -464,6 +482,10 @@ class Watchdrip {
 
     updateAgePresentation() {
         if (!this.bgValTimeTextWidget || !this.bgStaleLine) return;
+        const readRes = this.readInfoResult();
+        if (readRes.ok && readRes.changed) {
+            this.updateWidgets();
+        }
         this.updateTimesWidget();
         const staleReasons = this.watchdripData.getBgStaleReasons();
         this.bgStaleLine.setProperty(prop.VISIBLE, staleReasons.length > 0);
@@ -473,7 +495,7 @@ class Watchdrip {
         if (!time) {
             return false;
         }
-        return this.timeSensor.getTime() - time > timeout_ms;
+        return Date.now() - time > timeout_ms;
     }
 
     handleRareCases() {
@@ -491,42 +513,23 @@ class Watchdrip {
     }
 
     checkUpdates() {
-        this.updateTimesWidget();
         if (this.updatingData) {
             return;
         }
-        let lastInfoUpdate = this.readLastUpdate();
-        if (!lastInfoUpdate) {
-            this.handleRareCases();
-        } else {
-            if (this.lastUpdateSucessful) {
-                if (this.lastInfoUpdate !== lastInfoUpdate) {
-                    debug.log("update from remote");
-                    this.readInfo();
-                    this.lastInfoUpdate = lastInfoUpdate;
-                    this.updateWidgets();
-                    return;
-                }
-                if (this.isTimeout(lastInfoUpdate, this.updateIntervals)) {
-                    debug.log("reached updateIntervals");
-                    this.fetchRemoteInfo();
-                    return;
-                }
-                const bgTimeOlder = this.isTimeout(this.watchdripData.getBg().time, XDRIP_UPDATE_INTERVAL_MS);
-                const statusNowOlder = this.isTimeout(this.watchdripData.getStatus().now, XDRIP_UPDATE_INTERVAL_MS);
-                if (bgTimeOlder || statusNowOlder) {
-                    if (!this.isTimeout(this.lastUpdateAttempt, DATA_STALE_TIME_MS)) {
-                        debug.log("wait DATA_STALE_TIME");
-                        return;
-                    }
-                    debug.log("data older than sensor update interval");
-                    this.fetchRemoteInfo();
-                    return;
-                }
-                debug.log("data not modified");
-            } else {
-                this.handleRareCases();
-            }
+
+        const readRes = this.readInfoResult();
+        if (readRes.ok && readRes.changed) {
+            this.updateWidgets();
+        }
+        this.updateTimesWidget();
+
+        const bgTime = this.watchdripData.getBg() ? this.watchdripData.getBg().time : null;
+        const bgAgeMs = bgTime ? Date.now() - Number(bgTime) : Infinity;
+
+        // If BG data is older than 2 minutes or hasn't been fetched yet, fetch from phone
+        if (bgAgeMs > 2 * 60 * 1000 || !this.lastUpdateAttempt || (Date.now() - this.lastUpdateAttempt > 60 * 1000)) {
+            debug.log("data stale or periodic refresh needed, calling fetchRemoteInfo");
+            this.fetchRemoteInfo();
         }
     }
 
@@ -598,6 +601,7 @@ class Watchdrip {
         if (!this.cacheRefreshActive) {
             this.finishLocalInfoRead();
         }
+        this.fetchRemoteInfo();
     }
 
     finishLocalInfoRead() {
@@ -645,12 +649,11 @@ class Watchdrip {
                     attempt,
                     changed: result.changed ? 1 : 0,
                 });
-                if (result.changed) {
-                    this.updateWidgets();
-                    this.cacheRefreshActive = false;
-                    uiLog('CACHE_REFRESH_DONE', {attempt, reason: 'new_snapshot'});
-                    return;
-                }
+                this.updateWidgets();
+                this.finishLocalInfoRead();
+                this.cacheRefreshActive = false;
+                uiLog('CACHE_REFRESH_DONE', {attempt, reason: result.changed ? 'new_snapshot' : 'valid_snapshot'});
+                return;
             } else {
                 uiLog('CACHE_REFRESH_RETRY', {attempt, reason: result.reason});
             }
@@ -659,8 +662,10 @@ class Watchdrip {
                 this.cacheRefreshActive = false;
                 if (!sawValidSnapshot) {
                     uiLog('CACHE_REFRESH_FAILED', {attempt, reason: 'no_valid_snapshot'});
-                    this.finishLocalInfoRead();
+                    this.fetchRemoteInfo();
                 } else {
+                    this.updateWidgets();
+                    this.finishLocalInfoRead();
                     uiLog('CACHE_REFRESH_DONE', {attempt, reason: 'unchanged'});
                 }
                 return;
@@ -685,7 +690,7 @@ class Watchdrip {
     }
 
     fetchRemoteInfo(options = {}) {
-        const updateUI = options.updateUI !== false;
+        const updateUI = typeof options.updateUI === "boolean" ? options.updateUI : true;
         const onDone = typeof options.onDone === "function" ? options.onDone : null;
         const finish = () => {
             if (onDone) {
@@ -702,7 +707,7 @@ class Watchdrip {
         markBackgroundDebug('fetch_start', { mode: this.fetchMode });
         this.foregroundFetchInFlight = true;
         this.updatingData = true;
-        this.lastUpdateAttempt = this.timeSensor.getTime();
+        this.lastUpdateAttempt = Date.now();
         this.conf.infoLastUpdAttempt = this.lastUpdateAttempt;
         this.conf.infoLastUpdSucess = false;
         this.conf.save();
@@ -722,7 +727,7 @@ class Watchdrip {
                 if (error) {
                     debug.log("fetchRemoteInfo error: " + error);
                     this.lastUpdateSucessful = false;
-                    this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+                    this.conf.infoLastUpdAttempt = Date.now();
                     this.conf.infoLastUpdSucess = false;
                     this.conf.save();
                     finish();
@@ -731,7 +736,12 @@ class Watchdrip {
 
                 let {result: info = {}} = data;
                 if (info && !info.error) {
-                    const updateTime = this.saveInfo(info);
+                    // Parse info if it's a string (double-encoded JSON)
+                    let parsedInfo = info;
+                    if (typeof info === 'string') {
+                        try { parsedInfo = JSON.parse(info); } catch(e) { parsedInfo = info; }
+                    }
+                    const updateTime = this.saveInfo(parsedInfo);
                     this.lastInfoUpdate = updateTime;
                     this.lastUpdateSucessful = true;
                     this.conf.infoLastUpdAttempt = updateTime;
@@ -739,15 +749,24 @@ class Watchdrip {
                     this.conf.infoLastUpdSucess = true;
                     this.conf.save();
                     if (updateUI) {
-                        this.readInfo();
+                        // Use in-memory data directly instead of re-reading file
+                        // (readFileSync without encoding may return ArrayBuffer on Zepp OS 3+)
+                        if (parsedInfo && parsedInfo.bg && typeof parsedInfo.bg === 'object') {
+                            this.watchdripData.setData(parsedInfo);
+                            this.watchdripData.updateTimeDiff();
+                        } else {
+                            // Fallback: try file read
+                            this.readInfo();
+                        }
                         this.updateWidgets();
+                        this.finishLocalInfoRead();
                     }
                     debug.log("fetchRemoteInfo success");
                     markBackgroundDebug('fetch_success', { result: 'saved' });
                 } else {
                     debug.log("fetchRemoteInfo bad result: " + JSON.stringify(info));
                     this.lastUpdateSucessful = false;
-                    this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+                    this.conf.infoLastUpdAttempt = Date.now();
                     this.conf.infoLastUpdSucess = false;
                     this.conf.save();
                 }
@@ -757,7 +776,7 @@ class Watchdrip {
             this.foregroundFetchInFlight = false;
             this.updatingData = false;
             this.lastUpdateSucessful = false;
-            this.conf.infoLastUpdAttempt = this.timeSensor.getTime();
+            this.conf.infoLastUpdAttempt = Date.now();
             this.conf.infoLastUpdSucess = false;
             this.conf.save();
             debug.log("fetchRemoteInfo exception: " + e);
@@ -807,7 +826,7 @@ class Watchdrip {
             return;
         }
         this.serviceDebugTextWidget.setProperty(prop.MORE, {
-            text: 'BG: see bridge logs',
+            text: '',
         });
     }
 
@@ -870,7 +889,7 @@ class Watchdrip {
         const result = this.infoFile.fetchJSONResult();
         const data = result.data;
         if (data && data.bg && typeof data.bg === 'object') {
-            debug.log("data was read");
+            debug.log("READ BG: " + JSON.stringify(data.bg));
             const bgTime = data.bg.time == null ? '' : String(data.bg.time);
             const statusNow = data.status && data.status.now != null
                 ? String(data.status.now)
@@ -880,11 +899,16 @@ class Watchdrip {
             this.cacheSnapshotKey = snapshotKey;
             this.watchdripData.setData(data);
             this.watchdripData.updateTimeDiff();
+            const sugarLogLine = formatSugarLog('[WD_PAGE APP READ]', data, { status: 'OK', changed: changed ? 1 : 0 });
+            console.log(sugarLogLine);
             return { ok: true, reason: '', changed, snapshotKey };
         }
+        const failReason = result.reason || (data ? 'missing_bg' : 'missing');
+        const failLogLine = formatSugarLog('[WD_PAGE APP READ]', null, { status: 'FAILED', reason: failReason });
+        console.log(failLogLine);
         return {
             ok: false,
-            reason: result.reason || (data ? 'missing_bg' : 'missing'),
+            reason: failReason,
         };
     }
 
@@ -903,7 +927,7 @@ class Watchdrip {
 
     resetLastUpdate() {
         debug.log("resetLastUpdate");
-        this.lastUpdateAttempt = this.timeSensor.getTime();
+        this.lastUpdateAttempt = Date.now();
         this.lastUpdateSucessful = false;
         this.conf.infoLastUpdAttempt = this.lastUpdateAttempt
         this.conf.infoLastUpdSucess = this.lastUpdateSucessful;
@@ -933,7 +957,7 @@ class Watchdrip {
             this.infoFile.overrideWithJSON(info);
         }
         this.lastUpdateSucessful = true;
-        let time = this.timeSensor.getTime();
+        let time = Date.now();
         this.conf.infoLastUpd = time
         this.conf.infoLastUpdSucess = this.lastUpdateSucessful;
         this.conf.save();
@@ -991,7 +1015,7 @@ Page({
         logger.debug("page build invoked");
         try {
             debug = new DebugText();
-            debug.setLines(20);
+            debug.setLines(10);
             logger.log("page build widgets");
             let data = {page: PagesType.MAIN};
             try {

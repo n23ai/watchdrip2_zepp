@@ -13,6 +13,7 @@ export const WATCHDRIP_SETTINGS_DEFAULTS = {
     disableUpdates: false,
     showLog: true,
     useAppFetch: true,
+    timerType: 'auto',
 };
 
 export const WATCHDRIP_ALARM_SETTINGS_DEFAULTS = {
