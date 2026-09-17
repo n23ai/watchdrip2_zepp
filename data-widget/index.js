@@ -20,6 +20,7 @@ const COLOR_HIGH = 0xffcc4d
 const COLOR_VERY_HIGH = 0xff5252
 const COLOR_TARGET = 0x778877
 const COLOR_PREDICT = 0x8b9aa8
+const COLOR_TIME_GRID = 0x666666
 
 function widgetLog(event, fields = {}) {
   logger.log(formatLogLine('WD_WIDGET', 'CARD', event, fields))
@@ -28,26 +29,38 @@ function widgetLog(event, fields = {}) {
 let lastColdStartCheck = 0
 function ensureBackgroundService() {
   const now = Date.now()
-  if (now - lastColdStartCheck < 5000) return
+  if (now - lastColdStartCheck < 3000) return
   lastColdStartCheck = now
   try {
     const services = getAllAppServices() || []
     const isRunning = services.some(s => String(s).replace(/\.js$/, '') === 'app-service/index')
     if (!isRunning) {
       widgetLog('WIDGET_STARTING_SERVICE')
-      console.log('watchdrip widget: Service not running, initiating cold start')
-      logger.log('Service not running, initiating cold start')
-      const ret = startAppService({
+      console.log('watchdrip widget: Service not running, initiating cold start with force_fetch')
+      logger.log('Service not running, initiating cold start with force_fetch')
+      startAppService({
         file: 'app-service/index',
-        param: 'mode=continuous&source=widget_cold_start',
+        param: 'mode=continuous&action=force_fetch&source=widget_cold_start',
         complete_func: (info) => {
           const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info'
           console.log('watchdrip widget: startAppService complete_func result=' + res)
           logger.log('startAppService complete_func result=' + res)
         }
       })
-      console.log('watchdrip widget: startAppService ret=' + ret)
-      logger.log('startAppService ret=' + ret)
+    } else {
+      // Screen-on wake trigger: Route action=force_fetch to onEvent of the running AppService
+      widgetLog('WIDGET_FORCE_FETCH')
+      console.log('watchdrip widget: screen wake triggering force_fetch')
+      logger.log('screen wake triggering force_fetch')
+      startAppService({
+        file: 'app-service/index',
+        param: 'action=force_fetch',
+        complete_func: (info) => {
+          const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info'
+          console.log('watchdrip widget: force_fetch complete_func result=' + res)
+          logger.log('force_fetch complete_func result=' + res)
+        }
+      })
     }
   } catch (e) {
     console.log('watchdrip widget: ensureBackgroundService error: ' + e)
@@ -617,6 +630,48 @@ AppWidget({
       }
     }
 
+    const drawTimeGrid = () => {
+      const isRawMs = xMax > 100000000000
+      const fuzzer = isRawMs ? 1 : ((graph && numberValue(graph.fuzzer)) || 37500)
+      const realMinMs = xMin * fuzzer
+      const realMaxMs = xMax * fuzzer
+      const realDurationMs = realMaxMs - realMinMs
+      if (realDurationMs <= 0) return
+
+      const ONE_HOUR = 3600 * 1000
+      let stepMs = ONE_HOUR
+      if (realDurationMs > 8 * ONE_HOUR) {
+        stepMs = 3 * ONE_HOUR
+      } else if (realDurationMs > 4 * ONE_HOUR) {
+        stepMs = 2 * ONE_HOUR
+      }
+
+      const firstTickMs = Math.ceil(realMinMs / stepMs) * stepMs
+      let tickCount = 0
+      for (let tMs = firstTickMs; tMs < realMaxMs; tMs += stepMs) {
+        const posX = Math.round((tMs - realMinMs) / realDurationMs * this.state.contentWidth)
+        if (posX >= px(4) && posX <= this.state.contentWidth - px(4)) {
+          try {
+            this.state.graphCanvas.setPaint({ color: COLOR_TIME_GRID, line_width: px(1) })
+            this.state.graphCanvas.drawLine({
+              x1: posX,
+              y1: 0,
+              x2: posX,
+              y2: this.state.graphHeight,
+              color: COLOR_TIME_GRID,
+            })
+            tickCount++
+          } catch (e) {
+            widgetLog('WIDGET_TIME_GRID_ERROR')
+          }
+        }
+      }
+      if (tickCount > 0) {
+        widgetLog('WIDGET_TIME_GRID_DRAWN', { ticks: tickCount })
+      }
+    }
+
+    drawTimeGrid()
     drawThresholdLine(targetLowVal, COLOR_TARGET)
     drawThresholdLine(targetHighVal, COLOR_TARGET)
 

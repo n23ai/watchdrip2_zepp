@@ -1,0 +1,98 @@
+  - Enter 'help' to view the command.
+bridge$ connect
+[8D[8C[1000D[Kbridge$ c[9D[9C[1000D[Kbridge$ co[10D[10C[1000D[Kbridge$ con[11D[11C[1000D[Kbridge$ conn[12D[12C[1000D[Kbridge$ conne[13D[13C[1000D[Kbridge$ connec[14D[14C[1000D[Kbridge$ connect[15D[15C[1000D[Kbridge$ connect[15D[15C
+bridge$ [8D[8C[ℹ] successfully connected to app-Android.
+uninstall 43107
+install -t common
+[1000D[Kbridge$ u[9D[9C[1000D[Kbridge$ un[10D[10C[1000D[Kbridge$ uni[11D[11C[1000D[Kbridge$ unin[12D[12C[1000D[Kbridge$ unins[13D[13C[1000D[Kbridge$ uninst[14D[14C[1000D[Kbridge$ uninsta[15D[15C[1000D[Kbridge$ uninstal[16D[16C[1000D[Kbridge$ uninstall[17D[17C[1000D[Kbridge$ uninstall [18D[18C[1000D[Kbridge$ uninstall 4[19D[19C[1000D[Kbridge$ uninstall 43[20D[20C[1000D[Kbridge$ uninstall 431[21D[21C[1000D[Kbridge$ uninstall 4310[22D[22C[1000D[Kbridge$ uninstall 43107[23D[23C[1000D[Kbridge$ uninstall 43107[23D[23C
+Uninstalling 43107...
+bridge$ [8D[8C[1000D[Kbridge$ i[9D[9C[1000D[Kbridge$ in[10D[10C[1000D[Kbridge$ ins[11D[11C[1000D[Kbridge$ inst[12D[12C[1000D[Kbridge$ insta[13D[13C[1000D[Kbridge$ instal[14D[14C[1000D[Kbridge$ install[15D[15C[1000D[Kbridge$ install [16D[16C[1000D[Kbridge$ install -[17D[17C[1000D[Kbridge$ install -t[18D[18C[1000D[Kbridge$ install -t [19D[19C[1000D[Kbridge$ install -t c[20D[20C[1000D[Kbridge$ install -t co[21D[21C[1000D[Kbridge$ install -t com[22D[22C[1000D[Kbridge$ install -t comm[23D[23C[1000D[Kbridge$ install -t commo[24D[24C[1000D[Kbridge$ install -t common[25D[25C[1000D[Kbridge$ install -t common[25D[25C
+[ℹ] building...
+[⚠] Unsupported targets(mi-band7) have been removed.
+[ℹ] Start building package, targets: common.
+[WARNING] In order to achieve better display effects on Zepp OS
+[WARNING] The minimum width and height of the image /Users/nikolaj/Documents/dev/zepp/watchdrip2_zepp/assets/common/icon.png needs to be 248
+[WARNING] Please checkout the Design Guide: https://docs.zepp.com/docs/designs/visual/icons/
+[ℹ] [DEBUG-3:04:12 PM.713] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451718,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.mobileAppStore\",\"action\":\"eventHappened\"},\"params\":{\"data\":{\"appId\":43107},\"type\":\"appUninstalled\",\"target\":\"zeppAppStore\",\"timestamp\":1789387451715}}]"}}
+[ℹ] [DEBUG-3:04:12 PM.716] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451721,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"app.sapp.page\",\"action\":\"close\"},\"params\":{\"appId\":43107}}]"}}
+[ℹ] [DEBUG-3:04:12 PM.716] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":4,"appId":-1,"timestamp":1789387451721,"scope":"side-4.1.0-release.6-402","name":"process-mgr","tag":"-","message":"App LifeCycle Status: Destroy. ProcessInfo=appId[43107] processId[80673d1b0e652-1c74e048cabc43-2c80121fd78b8-27ddb1b38f7a7] devicePort[20] sidePort[1027]"}}
+[ℹ] [DEBUG-3:04:12 PM.716] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451721,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.system\",\"action\":\"eventHappened\"},\"params\":{\"type\":\"sideServiceClosed\",\"data\":{\"appId\":43107}}}]"}}
+[ℹ] [DEBUG-3:04:12 PM.716] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451725,"scope":"side-4.1.0-release.6-402","name":"app-channel-ble-1000:1000.BLE","tag":"-","message":"[RAW] [S] type=[bin] size=[17] data=[010102001400030463a800000000000000]"}}
+[ℹ] [DEBUG-3:04:12 PM.716] {"jsonrpc":"hmV1.0","method":{"module":"worker.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451722,"scope":"w-proc-p(80673d1b0e652-1c74e048cabc43-2c80121fd78b8-27ddb1b38f7a7)-i(43107)-s(3)-d(20)-s(1027)-m(0)-r(1)","name":"worker-channel-ble-peerSocket","tag":"-","message":"event=>readyState=[1] dataType=[sendClose] size=[17]"}}
+[ROLLUP] Transform 7 JS files in 636ms
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 51ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 28ms, done!
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 37ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 28ms, done!
+[PNG2TGA] Converting PNG files...
+[PNG2TGA] 18 files, 39ms, done!
+[QJSC] Compiling JS files...
+[QJSC] 4 files, 28ms, done!
+[ℹ] Uninstall mini-program/watchface success
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1789387452058,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"request [178601d1c457f3-1aba8aa2ecaf8b-19d33cfd38daa3-189ce328ed0a7] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"178601d1c457f3-1aba8aa2ecaf8b-19d33cfd38daa3-189ce328ed0a7\",\"method\":{\"module\":\"main.heartBeat.heartBeatInfo\",\"action\":\"close\"},\"params\":{\"timeout\":4000}}"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1789387452058,"scope":"side-4.1.0-release.6-402","name":"worker-channel-cmd","tag":"-","message":"response [178601d1c457f3-1aba8aa2ecaf8b-19d33cfd38daa3-189ce328ed0a7] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"178601d1c457f3-1aba8aa2ecaf8b-19d33cfd38daa3-189ce328ed0a7\",\"result\":{\"message\":\"success\"}}"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387452060,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [S] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}]"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"worker.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451722,"scope":"w-proc-p(80673d1b0e652-1c74e048cabc43-2c80121fd78b8-27ddb1b38f7a7)-i(43107)-s(3)-d(20)-s(1027)-m(0)-r(0)","name":"messaging-socket","tag":"-","message":"device close"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"worker.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387451722,"scope":"w-proc-p(80673d1b0e652-1c74e048cabc43-2c80121fd78b8-27ddb1b38f7a7)-i(43107)-s(3)-d(0)-s(1027)-m(0)-r(0)","name":"worker-channel-ble-peerSocket","tag":"-","message":"[RAW] [S] size=17 bin=\u0001\u0001\u0002\u0000\u0014\u0000\u0003\u0004c�\u0000\u0000\u0000\u0000\u0000\u0000\u0000 hex=010102001400030463a800000000000000"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387452063,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"app.sapp.page\",\"action\":\"close\"},\"params\":{\"appId\":43107}}]"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1789387452067,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"request [95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216\",\"method\":{\"module\":\"common.system.localFileTransfer\",\"action\":\"disconnect\"},\"params\":{\"appId\":43107}}"}}
+[ℹ] [DEBUG-3:04:14 PM.272] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387452066,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.appSettings\",\"action\":\"eventHappened\"},\"params\":{\"appId\":43107,\"target\":\"settingsApp\",\"type\":\"readyStateChanged\",\"data\":{\"reasonCode\":12,\"status\":\"closed\"},\"timestamp\":1789387452037}}]"}}
+[ℹ] [DEBUG-3:04:14 PM.273] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387452066,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"id\":\"95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216\",\"result\":{\"success\":true}}]"}}
+[ℹ] [DEBUG-3:04:14 PM.273] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":3,"appId":-1,"timestamp":1789387452067,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc","tag":"-","message":"response [95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216] => {\"jsonrpc\":\"hmV1.0\",\"id\":\"95282da2b9886-1c804368c14e42-1e176f7b24044a-10f885b923d216\",\"result\":{\"success\":true}}"}}
+[ℹ] [DEBUG-3:04:14 PM.273] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] WIDGET_DELEGATE resume_call 
+[ℹ] [DEBUG-3:04:14 PM.273] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] triggerWatchfaceWakeFetch: startAppService action=force_fetch 
+[ℹ] [DEBUG-3:04:14 PM.273] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.674Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] WIDGET_DELEGATE resume_call 
+[ℹ] [DEBUG-3:04:14 PM.273] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.678Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] triggerWatchfaceWakeFetch: startAppService action=force_fetch 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.685Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.690Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.696Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"data://info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.702Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"data://info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"/storage/js_apps/data/0000A863/info.json","flag":0} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.707Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.713Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"/storage/js_apps/data/0000A863/info.json","flag":0} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-1 typeof=object 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.723Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-1 typeof=object 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.729Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"/storage/js_apps/data/43107/info.json","flag":0} 
+[ℹ] [DEBUG-3:04:14 PM.274] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"/storage/js_apps/data/43107/info.json","flag":0} 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-1 typeof=object 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.736Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-1 typeof=object 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] readWatchDrip failed: fd_-2 / fd_-2 / fd_-1 / fd_-1 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.742Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] readWatchDrip failed: fd_-2 / fd_-2 / fd_-1 / fd_-1 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] WatchFace onResume invoke 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.750Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] WatchFace onResume invoke 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.754Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.760Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.766Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"data://info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] WIDGET_DELEGATE pause_call 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] WIDGET_DELEGATE resume_call 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.250Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] WIDGET_DELEGATE resume_call 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:11.974Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] WIDGET_DELEGATE pause_call 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.255Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] readWatchDripData start 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.275] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.261Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] tryReadFile attempt: {"path":"data://info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.266Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.272Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] tryReadFile attempt: {"path":"data://info.json","flag":0,"options":{"appId":43107}} 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [Sugar Mountains Live] [2026-09-14T15:04:12.279Z] [jsfwk.log  ] [watchface] [-] [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] [DEBUG-3:04:14 PM.276] jsapp:9121240 [I] 2026-09-14 [SUGAR_WF] openSync result fd=-2 typeof=number 
+[ℹ] getting package...
+bridge$ [8D[8C[ℹ] Start install lite app
+[ℹ] [DEBUG-3:04:25 PM.375] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":2,"appId":-1,"timestamp":1789387464399,"scope":"side-4.1.0-release.6-402","name":"app-channel-rpc-1000:1000.RPC","tag":"-","message":"[RAW] [R] jsonrpc=[{\"jsonrpc\":\"hmV1.0\",\"method\":{\"module\":\"message.notification.mobileAppStore\",\"action\":\"eventHappened\"},\"params\":{\"data\":{\"appId\":43107},\"type\":\"appInstalled\",\"target\":\"zeppAppStore\",\"timestamp\":1789387464397}}]"}}
+[ℹ] [DEBUG-3:04:25 PM.375] {"jsonrpc":"hmV1.0","method":{"module":"main.console.out","action":"log"},"params":{"level":4,"appId":-1,"timestamp":1789387464401,"scope":"side-4.1.0-release.6-402","name":"schedule","tag":"-","message":"process[43107] is not existed, cant close"}}
+[ℹ] Install lite app result: success.
+exit

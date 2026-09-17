@@ -5,8 +5,8 @@
     "appName": "WatchDrip2_zepp",
     "appType": "app",
     "version": {
-      "code": 4,
-      "name": "1.0.0"
+      "code": 12,
+      "name": "1.0.8"
     },
     "vender": "n23ai",
     "description": "The watchface for watchdrip application",

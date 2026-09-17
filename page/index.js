@@ -1,6 +1,5 @@
 import {DebugText} from "../shared/debug";
 import {getGlobal} from "../shared/global";
-import { MessageBuilder } from "../shared/message";
 import { getText } from "@zos/i18n";
 import {
     Colors,
@@ -46,7 +45,7 @@ import {DEVICE_WIDTH} from "../utils/config/device";
 
 import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
 import { Time, Vibrator } from '@zos/sensor'
-import { getPackageInfo, queryPermission, requestPermission } from '@zos/app'
+import { queryPermission, requestPermission, getPackageInfo } from '@zos/app'
 import { getAllAppServices, start as startAppService, stop as stopAppService } from '@zos/app-service'
 import { goBack, home } from '@zos/router'
 import { log, px } from '@zos/utils'
@@ -62,10 +61,8 @@ const BG_SERVICE_VERIFY_DELAY_MS = 1500;
 const BG_SERVICE_RETRY_DELAY_MS = 2000;
 const BG_SERVICE_MAX_ATTEMPTS = 2;
 const CACHE_READ_RETRY_DELAYS_MS = [250, 750, 1500, 2500];
-const POST_START_CACHE_REFRESH_DELAYS_MS = [750, 1500, 3000, 5000, 10000, 25000, 45000, 65000];
-const AGE_REFRESH_INTERVAL_MS = 30000;
-const {appId} = getPackageInfo();
-const ble = require('@zos/ble');
+const POST_START_CACHE_REFRESH_DELAYS_MS = [500, 1200, 2000, 3000, 4500, 6500, 10000, 15000];
+const AGE_REFRESH_INTERVAL_MS = 10000;
 
 var debug = null;
 var watchdrip = null;
@@ -148,6 +145,7 @@ function invokeWatchdripServiceStart(onReady, attempt, run) {
         const startResult = startAppService({
             file: BG_SERVICE_FILE,
             param: BG_SERVICE_PARAM,
+            reload: true,
             complete_func: (info) => {
                 callbackReceived = true;
                 callbackSuccess = !!(info && info.result);
@@ -194,25 +192,13 @@ function startWatchdripBackgroundService(onReady, attempt = 1, run = 0) {
         bgPageLog('ENSURE_BEGIN', 'run=' + operationRun + ' attempt=' + attempt);
         const serviceList = getServiceList('LIST_BEFORE_START');
         if (serviceList && isWatchdripServiceRunning(serviceList)) {
-            let conf = new WatchdripConfig();
-            conf.read();
-            const isStale = (Date.now() - lastUpd) > 15 * 60 * 1000;
-            if (!isStale) {
-                bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt + ' age=' + Math.floor((Date.now() - lastUpd)/1000) + 's');
-                finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
-                return;
-            }
-            bgPageLog('SERVICE_STALE_REPAIR', 'run=' + operationRun + ' age=' + Math.floor((Date.now() - lastUpd)/1000) + 's -> stopping zombie service');
+            bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt);
             try {
-                if (typeof stopAppService === 'function') {
-                    stopAppService({ file: BG_SERVICE_FILE });
-                }
-            } catch (eStop) {
-                bgPageLog('STOP_STALE_ERROR', formatError(eStop));
+                startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
+            } catch (eForce) {
+                bgPageLog('FORCE_FETCH_ERROR', formatError(eForce));
             }
-            setTimeout(() => {
-                invokeWatchdripServiceStart(onReady, attempt, operationRun);
-            }, 1000);
+            finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
             return;
         }
         invokeWatchdripServiceStart(onReady, attempt, operationRun);
@@ -275,8 +261,6 @@ class Watchdrip {
         this.lastUpdateAttempt = null;
         this.lastUpdateSucessful = false;
         this.updatingData = false;
-        this.foregroundMessageBuilder = null;
-        this.foregroundFetchInFlight = false;
         this.intervalTimer = null;
         this.ageRefreshTimer = null;
         this.progressTimer = null;
@@ -372,6 +356,20 @@ class Watchdrip {
                 }
             });
             this.startDataUpdates();
+
+            // If data is stale or missing on foreground open, trigger background force_fetch and poll cache
+            const bgObj = this.watchdripData.getBg();
+            const bgTime = bgObj ? Number(bgObj.time) : 0;
+            const isStale = !bgTime || (Date.now() - bgTime > 60000);
+            if (isStale) {
+                console.log("watchdrip app: foreground open with stale data, triggering force_fetch & cache refresh");
+                try {
+                    startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
+                } catch (eForce) {
+                    console.log("watchdrip app: startAppService force_fetch error: " + eForce);
+                }
+                this.schedulePostStartCacheRefresh();
+            }
         }
 
         createWidget(widget.BUTTON, {
@@ -526,10 +524,14 @@ class Watchdrip {
         const bgTime = this.watchdripData.getBg() ? this.watchdripData.getBg().time : null;
         const bgAgeMs = bgTime ? Date.now() - Number(bgTime) : Infinity;
 
-        // If BG data is older than 2 minutes or hasn't been fetched yet, fetch from phone
+        // If BG data is older than 2 minutes or periodic refresh needed, trigger force_fetch and cache refresh
         if (bgAgeMs > 2 * 60 * 1000 || !this.lastUpdateAttempt || (Date.now() - this.lastUpdateAttempt > 60 * 1000)) {
-            debug.log("data stale or periodic refresh needed, calling fetchRemoteInfo");
-            this.fetchRemoteInfo();
+            debug.log("data stale or periodic refresh needed, triggering force_fetch");
+            this.lastUpdateAttempt = Date.now();
+            try {
+                startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
+            } catch (eForce) {}
+            this.schedulePostStartCacheRefresh();
         }
     }
 
@@ -645,15 +647,17 @@ class Watchdrip {
             const result = this.readInfoResult();
             if (result.ok) {
                 sawValidSnapshot = true;
-                uiLog('CACHE_REFRESH_OK', {
-                    attempt,
-                    changed: result.changed ? 1 : 0,
-                });
-                this.updateWidgets();
-                this.finishLocalInfoRead();
-                this.cacheRefreshActive = false;
-                uiLog('CACHE_REFRESH_DONE', {attempt, reason: result.changed ? 'new_snapshot' : 'valid_snapshot'});
-                return;
+                if (result.changed) {
+                    uiLog('CACHE_REFRESH_OK', {
+                        attempt,
+                        changed: 1,
+                    });
+                    this.updateWidgets();
+                    this.finishLocalInfoRead();
+                    this.cacheRefreshActive = false;
+                    uiLog('CACHE_REFRESH_DONE', {attempt, reason: 'new_snapshot'});
+                    return;
+                }
             } else {
                 uiLog('CACHE_REFRESH_RETRY', {attempt, reason: result.reason});
             }
@@ -662,7 +666,10 @@ class Watchdrip {
                 this.cacheRefreshActive = false;
                 if (!sawValidSnapshot) {
                     uiLog('CACHE_REFRESH_FAILED', {attempt, reason: 'no_valid_snapshot'});
-                    this.fetchRemoteInfo();
+                    const hasData = this.watchdripData && this.watchdripData.getBg() && this.watchdripData.getBg().isHasData();
+                    if (!hasData && this.fetchMode === FetchMode.DISPLAY && this.messageTextWidget) {
+                        this.showMessage("Нет данных");
+                    }
                 } else {
                     this.updateWidgets();
                     this.finishLocalInfoRead();
@@ -681,106 +688,18 @@ class Watchdrip {
             POST_START_CACHE_REFRESH_DELAYS_MS[attempt]);
     }
 
-    getForegroundMessageBuilder() {
-        if (!this.foregroundMessageBuilder) {
-            this.foregroundMessageBuilder = new MessageBuilder({ appId, ble });
-            this.foregroundMessageBuilder.connect();
-        }
-        return this.foregroundMessageBuilder;
-    }
-
     fetchRemoteInfo(options = {}) {
-        const updateUI = typeof options.updateUI === "boolean" ? options.updateUI : true;
         const onDone = typeof options.onDone === "function" ? options.onDone : null;
-        const finish = () => {
-            if (onDone) {
-                onDone();
-            }
-        };
-
-        if (this.foregroundFetchInFlight) {
-            debug.log("fetchRemoteInfo already running");
-            finish();
-            return;
-        }
-        debug.log("fetchRemoteInfo");
-        markBackgroundDebug('fetch_start', { mode: this.fetchMode });
-        this.foregroundFetchInFlight = true;
-        this.updatingData = true;
+        debug.log("fetchRemoteInfo routed to background service");
         this.lastUpdateAttempt = Date.now();
-        this.conf.infoLastUpdAttempt = this.lastUpdateAttempt;
-        this.conf.infoLastUpdSucess = false;
-        this.conf.save();
-
-        let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams;
-        if (this.conf.alarmSettings && this.conf.alarmSettings.fetchParams) {
-            fetchParams = this.conf.alarmSettings.fetchParams;
-        }
-
         try {
-            this.getForegroundMessageBuilder().requestCb({
-                method: Commands.getInfo,
-                params: fetchParams,
-            }, {timeout: 5000}, (error, data) => {
-                this.foregroundFetchInFlight = false;
-                this.updatingData = false;
-                if (error) {
-                    debug.log("fetchRemoteInfo error: " + error);
-                    this.lastUpdateSucessful = false;
-                    this.conf.infoLastUpdAttempt = Date.now();
-                    this.conf.infoLastUpdSucess = false;
-                    this.conf.save();
-                    finish();
-                    return;
-                }
-
-                let {result: info = {}} = data;
-                if (info && !info.error) {
-                    // Parse info if it's a string (double-encoded JSON)
-                    let parsedInfo = info;
-                    if (typeof info === 'string') {
-                        try { parsedInfo = JSON.parse(info); } catch(e) { parsedInfo = info; }
-                    }
-                    const updateTime = this.saveInfo(parsedInfo);
-                    this.lastInfoUpdate = updateTime;
-                    this.lastUpdateSucessful = true;
-                    this.conf.infoLastUpdAttempt = updateTime;
-                    this.conf.infoLastUpd = updateTime;
-                    this.conf.infoLastUpdSucess = true;
-                    this.conf.save();
-                    if (updateUI) {
-                        // Use in-memory data directly instead of re-reading file
-                        // (readFileSync without encoding may return ArrayBuffer on Zepp OS 3+)
-                        if (parsedInfo && parsedInfo.bg && typeof parsedInfo.bg === 'object') {
-                            this.watchdripData.setData(parsedInfo);
-                            this.watchdripData.updateTimeDiff();
-                        } else {
-                            // Fallback: try file read
-                            this.readInfo();
-                        }
-                        this.updateWidgets();
-                        this.finishLocalInfoRead();
-                    }
-                    debug.log("fetchRemoteInfo success");
-                    markBackgroundDebug('fetch_success', { result: 'saved' });
-                } else {
-                    debug.log("fetchRemoteInfo bad result: " + JSON.stringify(info));
-                    this.lastUpdateSucessful = false;
-                    this.conf.infoLastUpdAttempt = Date.now();
-                    this.conf.infoLastUpdSucess = false;
-                    this.conf.save();
-                }
-                finish();
-            });
-        } catch (e) {
-            this.foregroundFetchInFlight = false;
-            this.updatingData = false;
-            this.lastUpdateSucessful = false;
-            this.conf.infoLastUpdAttempt = Date.now();
-            this.conf.infoLastUpdSucess = false;
-            this.conf.save();
-            debug.log("fetchRemoteInfo exception: " + e);
-            finish();
+            startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
+        } catch (eForce) {
+            debug.log("startAppService force_fetch error: " + eForce);
+        }
+        this.schedulePostStartCacheRefresh();
+        if (onDone) {
+            this.globalNS.setTimeout(onDone, 2000);
         }
     }
 
@@ -839,13 +758,18 @@ class Watchdrip {
             bgValColor = Colors.bgLow;
         }
 
+        const valText = String(bgObj.getBGVal() || '');
+        this.bgValTextWidget.setProperty(prop.TEXT, valText);
+        this.bgValTextWidget.setProperty(prop.COLOR, bgValColor);
         this.bgValTextWidget.setProperty(prop.MORE, {
-            text: bgObj.getBGVal(),
+            text: valText,
             color: bgValColor,
         });
 
+        const deltaText = (bgObj.delta ? String(bgObj.delta) : '') + " " + this.watchdripData.getStatus().getUnitText();
+        this.bgDeltaTextWidget.setProperty(prop.TEXT, deltaText);
         this.bgDeltaTextWidget.setProperty(prop.MORE, {
-            text: bgObj.delta + " " + this.watchdripData.getStatus().getUnitText()
+            text: deltaText,
         });
 
         this.bgTrendImageWidget.setProperty(prop.SRC, bgObj.getArrowResource());
@@ -862,14 +786,17 @@ class Watchdrip {
 
     updateTimesWidget() {
         let bgObj = this.watchdripData.getBg();
+        const timeText = this.watchdripData.getTimeAgo(bgObj.time);
+        this.bgValTimeTextWidget.setProperty(prop.TEXT, timeText);
         this.bgValTimeTextWidget.setProperty(prop.MORE, {
-            text: this.watchdripData.getTimeAgo(bgObj.time),
+            text: timeText,
         });
     }
 
     showMessage(text) {
         this.setBgElementsVisibility(false);
         this.bgStaleLine.setProperty(prop.VISIBLE, false);
+        this.messageTextWidget.setProperty(prop.TEXT, text);
         this.messageTextWidget.setProperty(prop.MORE, {text: text});
         this.setMessageVisibility(true);
     }
@@ -993,10 +920,6 @@ class Watchdrip {
         this.conf.save();
         this.stopAgeRefresh();
         this.stopDataUpdates();
-        if (this.foregroundMessageBuilder) {
-            this.foregroundMessageBuilder.disConnect();
-            this.foregroundMessageBuilder = null;
-        }
         this.vibrate.stop();
         resetPageBrightTime();
 

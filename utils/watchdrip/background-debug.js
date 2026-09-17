@@ -9,10 +9,23 @@ function nowMs(explicitTime) {
   }
 }
 
+let inMemoryDebug = null
+
+export function getInMemoryDebug() {
+  return inMemoryDebug
+}
+
+export function flushBackgroundDebugToDisk() {
+  try {
+    if (!inMemoryDebug) return
+    const conf = new WatchdripConfig()
+    conf.backgroundDebug = inMemoryDebug
+    conf.save()
+  } catch (e) {}
+}
+
 export function markBackgroundDebug(stage, fields = {}, explicitTime = 0) {
   try {
-    const conf = new WatchdripConfig()
-    const previous = conf.backgroundDebug || {}
     const at = nowMs(explicitTime)
     const item = {
       stage,
@@ -23,6 +36,15 @@ export function markBackgroundDebug(stage, fields = {}, explicitTime = 0) {
       alarmId: fields.alarmId,
       timeoutId: fields.timeoutId,
     }
+    if (!inMemoryDebug) {
+      try {
+        const conf = new WatchdripConfig()
+        if (conf && conf.backgroundDebug && conf.backgroundDebug.stage) {
+          inMemoryDebug = conf.backgroundDebug
+        }
+      } catch (eInit) {}
+    }
+    const previous = inMemoryDebug || {}
     const history = [...(previous.history || []), item].slice(-12)
     const debug = {
       stage,
@@ -31,8 +53,23 @@ export function markBackgroundDebug(stage, fields = {}, explicitTime = 0) {
       history,
       ...fields,
     }
-    conf.backgroundDebug = debug
-    conf.save()
+    inMemoryDebug = debug
+
+    // Do NOT synchronously read/save config on routine minute ticks.
+    // Only persist synchronously on fatal errors or failures to protect the SoC Deep Sleep window.
+    const isFatal = !!(
+      fields.error ||
+      (fields.result && fields.result !== 'ok' && fields.result !== 'continuous') ||
+      (typeof stage === 'string' && (stage.indexOf('error') !== -1 || stage.indexOf('timeout') !== -1 || stage.indexOf('fail') !== -1))
+    )
+    if (isFatal) {
+      try {
+        const conf = new WatchdripConfig()
+        conf.backgroundDebug = debug
+        conf.save()
+      } catch (eSave) {}
+    }
+
     return debug
   } catch (e) {
     return null
@@ -41,10 +78,9 @@ export function markBackgroundDebug(stage, fields = {}, explicitTime = 0) {
 
 export function markSchedulerDebug(fields = {}, explicitTime = 0) {
   try {
-    const conf = new WatchdripConfig()
-    const previous = conf.backgroundDebug || {}
+    const previous = inMemoryDebug || {}
     const scheduler = previous.scheduler || {}
-    conf.backgroundDebug = {
+    inMemoryDebug = {
       ...previous,
       scheduler: {
         ...scheduler,
@@ -52,15 +88,14 @@ export function markSchedulerDebug(fields = {}, explicitTime = 0) {
         at: nowMs(explicitTime),
       },
     }
-    conf.save()
-    return conf.backgroundDebug.scheduler
+    return inMemoryDebug.scheduler
   } catch (e) {
     return null
   }
 }
 
 export function getBackgroundDebugText(conf, timeSensor = null) {
-  const debug = conf && conf.backgroundDebug
+  const debug = inMemoryDebug || (conf && conf.backgroundDebug)
   if (!debug || !debug.stage) return 'dbg: none'
 
   let age = '?'

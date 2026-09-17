@@ -17,7 +17,8 @@ function ensureBackgroundService() {
       logger.log("Starting AppService from app.js onCreate");
       const ret = startAppService({
         file: 'app-service/index',
-        param: 'mode=continuous&source=app_onCreate',
+        param: 'mode=continuous&source=app_onCreate&action=force_fetch',
+        reload: true,
         complete_func: (info) => {
           const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info';
           console.log("watchdrip app: startAppService complete_func result=" + res);
@@ -27,7 +28,14 @@ function ensureBackgroundService() {
       console.log("watchdrip app: startAppService ret=" + ret);
       logger.log("startAppService ret=" + ret);
     } else {
-      console.log("watchdrip app: AppService is already running");
+      console.log("watchdrip app: AppService is already running, sending force_fetch");
+      try {
+        startAppService({
+          file: 'app-service/index',
+          param: 'action=force_fetch',
+          complete_func: () => {}
+        });
+      } catch (eF) {}
     }
   } catch (e) {
     console.log("watchdrip app: Failed to start AppService from app.js: " + e);

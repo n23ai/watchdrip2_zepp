@@ -87,6 +87,11 @@ class Session extends EventBus {
       return
     }
 
+    const alreadyExists = this.chunks.some(c => c.seqId === payload.seqId)
+    if (alreadyExists) {
+      return
+    }
+
     this.chunks.push(payload)
     this.checkIfReceiveAllChunks()
   }
@@ -210,11 +215,13 @@ export class MessageBuilder extends EventBus {
 
   connect(cb) {
     if (cb) this.whenReady(cb)
-    if (!this._connected) {
+    if (!this._connected || this.count('message') === 0) {
       this._connected = true
-      this.on('message', (message) => {
-        this.onMessage(message)
-      })
+      if (this.count('message') === 0) {
+        this.on('message', (message) => {
+          this.onMessage(message)
+        })
+      }
 
       this.ble &&
         this.ble.createConnect((index, data, size) => {
@@ -222,14 +229,11 @@ export class MessageBuilder extends EventBus {
         })
     }
 
-    if (this.isDevice) {
-      this.markReady()
-    }
     this.sendShake()
   }
 
   whenReady(cb) {
-    if (this.ready) {
+    if (this.ready && (!this.isDevice || this.appSidePort !== 0)) {
       cb && cb(this)
       return () => {}
     }
@@ -239,6 +243,7 @@ export class MessageBuilder extends EventBus {
   }
 
   markReady() {
+    if (this.isDevice && this.appSidePort === 0) return
     if (this.ready) return
     this.ready = true
     const callbacks = this.readyCallbacks.slice()
@@ -252,6 +257,7 @@ export class MessageBuilder extends EventBus {
     // Do NOT sendClose() or ble.disConnect() — the companion process
     // is shared with the background app-service.
     this.off('message')
+    this._connected = false
     this.ready = false
     this.readyCallbacks = []
     cb && cb(this)
@@ -310,7 +316,7 @@ export class MessageBuilder extends EventBus {
       version: MessageVersion.Version1,
       type: MessageType.Shake,
       port1: this.appDevicePort,
-      port2: this.appSidePort,
+      port2: 0,
       appId: this.appId,
       extra: 0,
       payload: Buffer.from([this.appId]),
@@ -318,7 +324,7 @@ export class MessageBuilder extends EventBus {
   }
 
   sendShake() {
-    if (this.appSidePort === 0) {
+    if (this.appSidePort === 0 || !this.ready) {
       const shake = this.buildShake()
       this.sendMsg(shake)
     }
@@ -791,6 +797,7 @@ export class MessageBuilder extends EventBus {
       this.appSidePort = 0
       this.ready = false
       this.emit('close', data)
+      this.emit('error', Error('Connection closed by phone'))
     } else {
       // logger.error('error appSidePort=>%d data=>%j', this.appSidePort, data)
     }
@@ -884,33 +891,48 @@ export class MessageBuilder extends EventBus {
   }
 
   requestCb(data, opts, cb) {
+    const defaultOpts = { timeout: 60000 }
+    if (typeof opts === 'function') {
+      cb = opts
+      opts = defaultOpts
+    } else {
+      opts = Object.assign(defaultOpts, opts)
+    }
+
     let cancelled = false
+    let hasReturned = false
+    let timer1 = null
+    let readyTimer = null
+    let cancelReady = null
     let cleanupActiveRequest = null
 
-    const _requestCb = () => {
-      if (cancelled) return
-      const defaultOpts = { timeout: 60000 }
-
-      if (typeof opts === 'function') {
-        cb = opts
-        opts = defaultOpts
-      } else {
-        opts = Object.assign(defaultOpts, opts)
+    const finish = (error, result) => {
+      if (hasReturned || cancelled) return
+      hasReturned = true
+      if (readyTimer) {
+        clearTimeout(readyTimer)
+        readyTimer = null
       }
-
-      const requestId = genTraceId()
-      let timer1 = null
-      let hasReturned = false
-
-      const finish = (error, result) => {
-        if (hasReturned || cancelled) return
-        hasReturned = true
-        this.off('response', transact)
-        this.off('error', onError)
-        if (timer1) clearTimeout(timer1)
+      if (cancelReady) {
+        cancelReady()
+        cancelReady = null
+      }
+      if (timer1) {
+        clearTimeout(timer1)
         timer1 = null
+      }
+      if (cleanupActiveRequest) {
+        cleanupActiveRequest()
+        cleanupActiveRequest = null
+      }
+      if (typeof cb === 'function') {
         cb(error, result)
       }
+    }
+
+    const _requestCb = () => {
+      if (cancelled || hasReturned) return
+      const requestId = genTraceId()
 
       const transact = ({ traceId, payload }) => {
         // logger.debug('traceId=>%d payload=>%s', traceId, payload.toString('hex'))
@@ -930,12 +952,8 @@ export class MessageBuilder extends EventBus {
       this.sendJson({ requestId, json: data, type: MessagePayloadType.Request })
 
       cleanupActiveRequest = () => {
-        if (hasReturned) return
-        hasReturned = true
         this.off('response', transact)
         this.off('error', onError)
-        if (timer1) clearTimeout(timer1)
-        timer1 = null
       }
 
       if (opts.timeout > 0) {
@@ -946,12 +964,28 @@ export class MessageBuilder extends EventBus {
       }
     }
 
-    let cancelReady = null
     if (this.isDevice) {
-      if (this.ready) {
+      if (this.ready && this.appSidePort !== 0) {
         _requestCb()
       } else {
-        cancelReady = this.whenReady(_requestCb)
+        cancelReady = this.whenReady(() => {
+          if (readyTimer) {
+            clearTimeout(readyTimer)
+            readyTimer = null
+          }
+          cancelReady = null
+          _requestCb()
+        })
+        if (opts.timeout > 0) {
+          readyTimer = setTimeout(() => {
+            readyTimer = null
+            if (cancelReady) {
+              cancelReady()
+              cancelReady = null
+            }
+            finish(Error(`Timed out waiting for connection ready in ${opts.timeout}ms.`))
+          }, opts.timeout)
+        }
         // Re-send shake to nudge the connection in case the first one was lost
         try { this.sendShake() } catch(e) {}
       }
@@ -961,8 +995,22 @@ export class MessageBuilder extends EventBus {
 
     return () => {
       cancelled = true
-      if (cancelReady) cancelReady()
-      if (cleanupActiveRequest) cleanupActiveRequest()
+      if (readyTimer) {
+        clearTimeout(readyTimer)
+        readyTimer = null
+      }
+      if (cancelReady) {
+        cancelReady()
+        cancelReady = null
+      }
+      if (timer1) {
+        clearTimeout(timer1)
+        timer1 = null
+      }
+      if (cleanupActiveRequest) {
+        cleanupActiveRequest()
+        cleanupActiveRequest = null
+      }
     }
   }
 

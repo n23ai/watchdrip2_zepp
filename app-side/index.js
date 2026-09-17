@@ -9,7 +9,7 @@ import { formatLogLine, summarizeInfo } from '../shared/log-format'
 
 const messageBuilder = new MessageBuilder()
 const MAX_LOG_LINES = 50
-const HTTP_TIMEOUT_MS = 5000
+const HTTP_TIMEOUT_MS = 8000
 
 let logBuffer = []
 
@@ -75,12 +75,15 @@ function getServerUrl() {
   const storage = getSettingsStorage()
   let url = storage && storage.getItem('server_url')
   if (!url) url = SERVER_URL
+  if (url.includes('localhost')) {
+    url = url.replace('localhost', '127.0.0.1')
+  }
   return url.endsWith('/') ? url : url + '/'
 }
 
 function getTimerType() {
   const storage = getSettingsStorage()
-  return (storage && storage.getItem('timer_type')) || 'auto'
+  return (storage && storage.getItem('timer_type')) || 'on_per_minute'
 }
 
 async function requestInfo(url, meta) {
@@ -92,7 +95,15 @@ async function requestInfo(url, meta) {
       setTimeout(() => reject(new Error('HTTP_TIMEOUT')), HTTP_TIMEOUT_MS)
     })
     const response = await Promise.race([fetchPromise, timeoutPromise])
-    if (!response || !response.body) throw Error('NO_DATA')
+    if (!response) throw Error('NO_RESPONSE')
+    if (response.error) {
+      const errMsg = response.error.message || ('ERR_' + response.error.code)
+      throw Error(errMsg)
+    }
+    if (response.status && response.status >= 400) {
+      throw Error('HTTP_' + response.status)
+    }
+    if (!response.body) throw Error('EMPTY_BODY')
     const data = response.body
     addCritical('HTTP_OK', meta, {
       code: response.status || 200,
@@ -162,7 +173,7 @@ AppSideService({
             logBuffer = []
             persistLogs()
           } else if (key === 'timer_type') {
-            const newType = storage.getItem('timer_type') || 'auto'
+            const newType = (storage && storage.getItem('timer_type')) || 'on_per_minute'
             addCritical('TIMER_TYPE_CHANGED', {}, { code: String(newType) })
             persistLogs()
           } else if (key === 'trigger_upload') {

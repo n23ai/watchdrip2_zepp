@@ -93,6 +93,36 @@ export class Path {
     }
 
     fetch(limit = Infinity) {
+        let fd = null;
+        try {
+            fd = openSync({ path: this.relativePath, flag: O_RDONLY });
+            if (fd !== undefined && fd !== null && Number(fd) >= 0) {
+                const buf = new ArrayBuffer(16384);
+                let bytesRead = 0;
+                try {
+                    bytesRead = readSync({ fd: Number(fd), buffer: buf });
+                } catch (eR1) {
+                    try {
+                        bytesRead = readSync({ fd: fd, buffer: buf });
+                    } catch (eR2) {
+                        bytesRead = 0;
+                    }
+                }
+                try { closeSync({ fd: Number(fd) }); } catch (c1) {
+                    try { closeSync({ fd: fd }); } catch (c2) {}
+                }
+                fd = null;
+                const numBytes = Number(bytesRead);
+                if (!isNaN(numBytes) && numBytes > 0) {
+                    return buf.slice(0, numBytes);
+                }
+            }
+        } catch (eOpen) {
+            if (fd !== null && fd !== undefined && Number(fd) >= 0) {
+                try { closeSync({ fd: Number(fd) }); } catch (c) {}
+            }
+        }
+
         try {
             return readFileSync({
                 path: this.relativePath
@@ -103,36 +133,83 @@ export class Path {
     }
 
     fetchText(limit = Infinity) {
+        // 1. Primary: openSync + readSync into ArrayBuffer (fast & reliable on Zepp OS 3+/4+)
+        const pathCandidates = [
+            this.relativePath,
+            'data://' + this.relativePath,
+            { path: this.relativePath, flag: O_RDONLY, options: { appId: 43107 } },
+            { path: 'data://' + this.relativePath, flag: O_RDONLY, options: { appId: 43107 } }
+        ];
+
+        for (let i = 0; i < pathCandidates.length; i++) {
+            const cand = pathCandidates[i];
+            let fd = null;
+            try {
+                if (typeof cand === 'object') {
+                    fd = openSync(cand);
+                } else {
+                    fd = openSync({ path: cand, flag: O_RDONLY });
+                }
+                if (fd !== undefined && fd !== null && Number(fd) >= 0) {
+                    const buf = new ArrayBuffer(16384);
+                    let bytesRead = 0;
+                    try {
+                        bytesRead = readSync({ fd: Number(fd), buffer: buf });
+                    } catch (eR1) {
+                        try {
+                            bytesRead = readSync({ fd: fd, buffer: buf });
+                        } catch (eR2) {
+                            bytesRead = 0;
+                        }
+                    }
+                    try { closeSync({ fd: Number(fd) }); } catch (c1) {
+                        try { closeSync({ fd: fd }); } catch (c2) {}
+                    }
+                    fd = null;
+
+                    const numBytes = Number(bytesRead);
+                    if (!isNaN(numBytes) && numBytes > 0) {
+                        const u8 = new Uint8Array(buf, 0, numBytes);
+                        const str = FsTools.decodeUtf8(u8, numBytes);
+                        if (str && str.length > 0) {
+                            return str;
+                        }
+                    }
+                }
+            } catch (eOpen) {
+                if (fd !== null && fd !== undefined && Number(fd) >= 0) {
+                    try { closeSync({ fd: Number(fd) }); } catch (c) {}
+                }
+            }
+        }
+
+        // 2. Fallback: readFileSync raw buffer
         try {
-            const st = this.stat();
+            const raw = readFileSync({ path: this.relativePath });
+            if (typeof raw === 'string' && raw.length > 0) {
+                return raw;
+            }
+            if (raw && (raw instanceof ArrayBuffer || raw.byteLength !== undefined)) {
+                const u8 = new Uint8Array(raw);
+                const str = FsTools.decodeUtf8(u8, u8.length);
+                if (str && str.length > 0) {
+                    return str;
+                }
+            }
+        } catch (eRaw) {}
+
+        // 3. Fallback: readFileSync with utf8 encoding option
+        try {
             const res = readFileSync({
                 path: this.relativePath,
                 options: { encoding: 'utf8' }
             });
-            console.log('[PATH fetchText] path=' + this.relativePath + ' stat_size=' + (st ? st.size : 'undef') + ' res_type=' + typeof res + ' len=' + (res ? (res.length || res.byteLength) : 0));
-            if (typeof res === 'string') {
+            if (typeof res === 'string' && res.length > 0) {
                 return res;
             }
-            if (res) {
-                return FsTools.ab2str(res);
-            }
-            return null;
-        } catch (e) {
-            console.log('[PATH fetchText error] path=' + this.relativePath + ' err=' + e);
-            try {
-                const raw = readFileSync({
-                    path: this.relativePath
-                });
-                console.log('[PATH fallback] raw_type=' + typeof raw + ' len=' + (raw ? (raw.length || raw.byteLength) : 0));
-                if (raw && typeof raw !== 'string') {
-                    return FsTools.ab2str(raw);
-                }
-                return raw || null;
-            } catch (e2) {
-                console.log('[PATH fallback error] path=' + this.relativePath + ' err=' + e2);
-                return null;
-            }
-        }
+        } catch (eRes) {}
+
+        return null;
     }
 
     fetchJSON() {
@@ -149,17 +226,7 @@ export class Path {
             }
             return { data: data, reason: '' };
         } catch (e) {
-            text = this.fetchText();
-            if (!text) return { data: null, reason: 'missing' };
-            try {
-                let data = typeof text === 'string' ? JSON.parse(text) : text;
-                if (typeof data === 'string') {
-                    data = JSON.parse(data);
-                }
-                return { data: data, reason: '' };
-            } catch (err) {
-                return { data: null, reason: 'invalid_json' };
-            }
+            return { data: null, reason: 'invalid_json' };
         }
     }
 
@@ -317,18 +384,41 @@ export class FsTools {
         return `/storage/${base}/data/${idn}${path}`;
     }
 
+    static decodeUtf8(uint8, len) {
+        if (!uint8 || len <= 0) return '';
+        let out = '';
+        let i = 0;
+        while (i < len) {
+            const c = uint8[i++];
+            if (c < 0x80) {
+                out += String.fromCharCode(c);
+            } else if (c > 0xbf && c < 0xe0) {
+                if (i >= len) break;
+                const c2 = uint8[i++];
+                out += String.fromCharCode(((c & 0x1f) << 6) | (c2 & 0x3f));
+            } else if (c > 0xdf && c < 0xf0) {
+                if (i + 1 >= len) break;
+                const c2 = uint8[i++];
+                const c3 = uint8[i++];
+                out += String.fromCharCode(((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f));
+            } else if (c > 0xef && c < 0xf8) {
+                if (i + 2 >= len) break;
+                const c2 = uint8[i++];
+                const c3 = uint8[i++];
+                const c4 = uint8[i++];
+                let u = (((c & 0x07) << 18) | ((c2 & 0x3f) << 12) | ((c3 & 0x3f) << 6) | (c4 & 0x3f)) - 0x10000;
+                out += String.fromCharCode(0xd800 + (u >> 10), 0xdc00 + (u & 0x3ff));
+            } else {
+                out += String.fromCharCode(c);
+            }
+        }
+        return out;
+    }
+
     static ab2str(buf) {
         if (!buf) return '';
         const uint8 = new Uint8Array(buf);
-        const len = uint8.length;
-        if (len === 0) return '';
-        let result = '';
-        const chunkSize = 1024;
-        for (let i = 0; i < len; i += chunkSize) {
-            const sub = uint8.subarray(i, Math.min(i + chunkSize, len));
-            result += String.fromCharCode.apply(null, sub);
-        }
-        return result;
+        return FsTools.decodeUtf8(uint8, uint8.length);
     }
 
     static str2ab(str) {
