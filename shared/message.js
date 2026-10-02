@@ -189,6 +189,7 @@ export class MessageBuilder extends EventBus {
     this.tempBuf = null
     this.ready = this.isSide
     this.readyCallbacks = []
+    this.pendingRequests = []
     // Promise is not part of the Zepp OS 3 Device/App Service contract.
     // Keep the legacy Promise path only in Side Service, where it is supported.
     this.shakeTask = this.isSide ? Deferred() : null
@@ -253,13 +254,49 @@ export class MessageBuilder extends EventBus {
     })
   }
 
+  clearPendingRequests(error = new Error('Connection reset')) {
+    if (this.readyCallbacks && this.readyCallbacks.length) {
+      const cbs = this.readyCallbacks.slice()
+      this.readyCallbacks = []
+      cbs.forEach((item) => {
+        if (item) item.cancelled = true
+      })
+    }
+    if (this.pendingRequests && this.pendingRequests.length) {
+      const reqs = this.pendingRequests.slice()
+      this.pendingRequests = []
+      reqs.forEach((req) => {
+        try {
+          if (req && typeof req.reject === 'function') {
+            req.reject(error)
+          }
+        } catch (e) {
+          logger && logger.error && logger.error('error rejecting pending request: ' + e)
+        }
+      })
+    }
+    this.emit('error', error)
+  }
+
+  resetConnection(reason = 'manual_reset') {
+    logger.warn('[MSG] resetConnection: ' + reason + ' (was ready=' + this.ready + ' port2=' + this.appSidePort + ')')
+    this.ready = false
+    this.appSidePort = 0
+    this.shakeTask = this.isSide ? Deferred() : null
+    this.waitingShakePromise = this.shakeTask ? this.shakeTask.promise : null
+    const extra = reason === 'remote_close' ? ' (closed by phone)' : ''
+    this.clearPendingRequests(new Error('Connection reset: ' + reason + extra))
+  }
+
   disConnect(cb) {
     // Do NOT sendClose() or ble.disConnect() — the companion process
     // is shared with the background app-service.
     this.off('message')
     this._connected = false
     this.ready = false
+    this.appSidePort = 0
     this.readyCallbacks = []
+    this.clearPendingRequests(new Error('Connection disconnected'))
     cb && cb(this)
   }
 
@@ -794,10 +831,8 @@ export class MessageBuilder extends EventBus {
       data.type === MessageType.Close
     ) {
       logger.warn('[MSG] Received Close from phone, resetting connection state. port2=%d', data.port2)
-      this.appSidePort = 0
-      this.ready = false
       this.emit('close', data)
-      this.emit('error', Error('Connection closed by phone'))
+      this.resetConnection('remote_close')
     } else {
       // logger.error('error appSidePort=>%d data=>%j', this.appSidePort, data)
     }
@@ -841,12 +876,28 @@ export class MessageBuilder extends EventBus {
 
   request(data, opts) {
     const _request = () => {
-      const defaultOpts = { timeout: 60000 }
+      const defaultOpts = { timeout: 15000 }
       const requestId = genTraceId()
       const defer = Deferred()
       opts = Object.assign(defaultOpts, opts)
 
+      let reqEntry = {
+        reject: (err) => defer.reject(err)
+      }
+      this.pendingRequests.push(reqEntry)
+
+      const cleanup = () => {
+        if (reqEntry) {
+          const idx = this.pendingRequests.indexOf(reqEntry)
+          if (idx !== -1) {
+            this.pendingRequests.splice(idx, 1)
+          }
+          reqEntry = null
+        }
+      }
+
       const error = (error) => {
+        cleanup()
         this.off('error', error)
         defer.reject(error)
       }
@@ -854,6 +905,7 @@ export class MessageBuilder extends EventBus {
       const transact = ({ traceId, payload }) => {
         // logger.debug('traceId=>%d payload=>%s', traceId, payload.toString('hex'))
         if (traceId === requestId) {
+          cleanup()
           const resultJson = this.buf2Json(payload)
           // logger.debug('request id=>%d payload=>%j', requestId, data)
           // logger.debug('response id=>%d payload=>%j', requestId, resultJson)
@@ -876,22 +928,32 @@ export class MessageBuilder extends EventBus {
             return resolve()
           }
 
-          // logger.error(`request timeout in ${opts.timeout}ms error=> %d data=> %j`, requestId, data)
+          cleanup()
           this.off('response', transact)
+          this.resetConnection('request_timeout')
 
-          reject(Error(`Timed out in ${opts.timeout}ms.`))
+          reject(Error('TIMEOUT_15S'))
         }),
         defer.promise.finally(() => {
           hasReturned = true
+          cleanup()
         }),
       ])
     }
 
-    return this.waitingShakePromise.then(_request)
+    if (this.waitingShakePromise) {
+      return this.waitingShakePromise.then(_request)
+    }
+    return new Promise((resolve, reject) => {
+      this.requestCb(data, opts, (err, res) => {
+        if (err) reject(err)
+        else resolve(res)
+      })
+    })
   }
 
   requestCb(data, opts, cb) {
-    const defaultOpts = { timeout: 60000 }
+    const defaultOpts = { timeout: 15000 }
     if (typeof opts === 'function') {
       cb = opts
       opts = defaultOpts
@@ -905,10 +967,19 @@ export class MessageBuilder extends EventBus {
     let readyTimer = null
     let cancelReady = null
     let cleanupActiveRequest = null
+    let reqEntry = null
+    const startTime = Date.now()
 
     const finish = (error, result) => {
       if (hasReturned || cancelled) return
       hasReturned = true
+      if (reqEntry) {
+        const idx = this.pendingRequests.indexOf(reqEntry)
+        if (idx !== -1) {
+          this.pendingRequests.splice(idx, 1)
+        }
+        reqEntry = null
+      }
       if (readyTimer) {
         clearTimeout(readyTimer)
         readyTimer = null
@@ -929,6 +1000,11 @@ export class MessageBuilder extends EventBus {
         cb(error, result)
       }
     }
+
+    reqEntry = {
+      reject: (err) => finish(err)
+    }
+    this.pendingRequests.push(reqEntry)
 
     const _requestCb = () => {
       if (cancelled || hasReturned) return
@@ -957,10 +1033,20 @@ export class MessageBuilder extends EventBus {
       }
 
       if (opts.timeout > 0) {
+        const elapsed = Date.now() - startTime
+        const remaining = opts.timeout - elapsed
+        if (remaining <= 0) {
+          const timeoutErr = Error('TIMEOUT_15S')
+          finish(timeoutErr)
+          this.resetConnection('request_timeout')
+          return
+        }
         timer1 = setTimeout(() => {
           timer1 = null
-          finish(Error(`Timed out in ${opts.timeout}ms.`))
-        }, opts.timeout)
+          const timeoutErr = Error('TIMEOUT_15S')
+          finish(timeoutErr)
+          this.resetConnection('request_timeout')
+        }, remaining)
       }
     }
 
@@ -968,6 +1054,18 @@ export class MessageBuilder extends EventBus {
       if (this.ready && this.appSidePort !== 0) {
         _requestCb()
       } else {
+        if (opts.timeout > 0) {
+          readyTimer = setTimeout(() => {
+            readyTimer = null
+            if (cancelReady) {
+              cancelReady()
+              cancelReady = null
+            }
+            const readyErr = Error(`TIMEOUT_15S: Timed out waiting for connection ready in ${opts.timeout}ms.`)
+            finish(readyErr)
+            this.resetConnection('ready_timeout')
+          }, opts.timeout)
+        }
         cancelReady = this.whenReady(() => {
           if (readyTimer) {
             clearTimeout(readyTimer)
@@ -976,25 +1074,25 @@ export class MessageBuilder extends EventBus {
           cancelReady = null
           _requestCb()
         })
-        if (opts.timeout > 0) {
-          readyTimer = setTimeout(() => {
-            readyTimer = null
-            if (cancelReady) {
-              cancelReady()
-              cancelReady = null
-            }
-            finish(Error(`Timed out waiting for connection ready in ${opts.timeout}ms.`))
-          }, opts.timeout)
-        }
-        // Re-send shake to nudge the connection in case the first one was lost
         try { this.sendShake() } catch(e) {}
       }
     } else {
-      this.waitingShakePromise.then(_requestCb)
+      if (this.waitingShakePromise) {
+        this.waitingShakePromise.then(_requestCb)
+      } else {
+        _requestCb()
+      }
     }
 
     return () => {
       cancelled = true
+      if (reqEntry) {
+        const idx = this.pendingRequests.indexOf(reqEntry)
+        if (idx !== -1) {
+          this.pendingRequests.splice(idx, 1)
+        }
+        reqEntry = null
+      }
       if (readyTimer) {
         clearTimeout(readyTimer)
         readyTimer = null
@@ -1019,14 +1117,20 @@ export class MessageBuilder extends EventBus {
   }
 
   call(data) {
-    return this.waitingShakePromise.then(() => {
-      return this.sendJson({ json: data, type: MessagePayloadType.Notify })
-    })
+    if (this.waitingShakePromise) {
+      return this.waitingShakePromise.then(() => {
+        return this.sendJson({ json: data, type: MessagePayloadType.Notify })
+      })
+    }
+    return Promise.resolve(this.sendJson({ json: data, type: MessagePayloadType.Notify }))
   }
 
   log(str) {
-    return this.waitingShakePromise.then(() => {
-      return this.sendLog(str)
-    })
+    if (this.waitingShakePromise) {
+      return this.waitingShakePromise.then(() => {
+        return this.sendLog(str)
+      })
+    }
+    return Promise.resolve(this.sendLog(str))
   }
 }

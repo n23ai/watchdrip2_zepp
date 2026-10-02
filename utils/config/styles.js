@@ -132,7 +132,7 @@ export const COMMON_BUTTON_ADD_TREATMENT = {
 
 export const VERSION_TEXT = {
   x: (DEVICE_WIDTH - px(288)) / 2,
-  y: DEVICE_HEIGHT + px(130),
+  y: DEVICE_HEIGHT - px(35),
   w: px(288),
   h: px(28),
   color: Colors.white,

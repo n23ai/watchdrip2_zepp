@@ -1,11 +1,10 @@
-import { Time } from '@zos/sensor'
 import { Path } from '../utils/path'
 import { WatchdripData } from '../utils/watchdrip/watchdrip-data'
 import { WF_INFO_FILE } from '../utils/config/global-constants'
 import { createWidget, getAppWidgetSize, widget, prop, align, text_style } from '@zos/ui'
 import { px, log } from '@zos/utils'
+import { start as startAppService } from '@zos/app-service'
 import { formatLogLine, summarizeInfo, formatSugarLog } from '../shared/log-format'
-import { getAllAppServices, start as startAppService } from '@zos/app-service'
 
 const logger = log.getLogger('watchdrip_widget')
 const AGE_REFRESH_MS = 3000
@@ -26,47 +25,6 @@ function widgetLog(event, fields = {}) {
   logger.log(formatLogLine('WD_WIDGET', 'CARD', event, fields))
 }
 
-let lastColdStartCheck = 0
-function ensureBackgroundService() {
-  const now = Date.now()
-  if (now - lastColdStartCheck < 3000) return
-  lastColdStartCheck = now
-  try {
-    const services = getAllAppServices() || []
-    const isRunning = services.some(s => String(s).replace(/\.js$/, '') === 'app-service/index')
-    if (!isRunning) {
-      widgetLog('WIDGET_STARTING_SERVICE')
-      console.log('watchdrip widget: Service not running, initiating cold start with force_fetch')
-      logger.log('Service not running, initiating cold start with force_fetch')
-      startAppService({
-        file: 'app-service/index',
-        param: 'mode=continuous&action=force_fetch&source=widget_cold_start',
-        complete_func: (info) => {
-          const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info'
-          console.log('watchdrip widget: startAppService complete_func result=' + res)
-          logger.log('startAppService complete_func result=' + res)
-        }
-      })
-    } else {
-      // Screen-on wake trigger: Route action=force_fetch to onEvent of the running AppService
-      widgetLog('WIDGET_FORCE_FETCH')
-      console.log('watchdrip widget: screen wake triggering force_fetch')
-      logger.log('screen wake triggering force_fetch')
-      startAppService({
-        file: 'app-service/index',
-        param: 'action=force_fetch',
-        complete_func: (info) => {
-          const res = info ? (info.result !== undefined ? info.result : JSON.stringify(info)) : 'no-info'
-          console.log('watchdrip widget: force_fetch complete_func result=' + res)
-          logger.log('force_fetch complete_func result=' + res)
-        }
-      })
-    }
-  } catch (e) {
-    console.log('watchdrip widget: ensureBackgroundService error: ' + e)
-    logger.error('widget ensureBackgroundService error: ' + e)
-  }
-}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
@@ -165,8 +123,7 @@ AppWidget({
   onInit() {
     widgetLog('WIDGET_INIT')
     try {
-      this.state.timeSensor = new Time()
-      this.state.watchdripData = new WatchdripData(this.state.timeSensor)
+      this.state.watchdripData = new WatchdripData(null)
       this.state.infoFile = new Path('full', WF_INFO_FILE)
     } catch (e) {
       widgetLog('WIDGET_INIT_ERROR', { reason: 'setup' })
@@ -365,8 +322,16 @@ AppWidget({
   onResume() {
     widgetLog('WIDGET_RESUME')
     try {
-      ensureBackgroundService()
       this.readAndRender()
+      try {
+        startAppService({
+          file: 'app-service/index',
+          param: 'mode=continuous&action=force_fetch',
+          complete_func: () => {}
+        })
+      } catch (eService) {
+        logger.error('widget startAppService error: ' + eService)
+      }
       this.stopAgeTimer()
       this.state.ageTimer = setInterval(() => {
         this.readAndRender()
@@ -400,10 +365,7 @@ AppWidget({
         this.state.infoFile = new Path('full', WF_INFO_FILE)
       }
       if (!this.state.watchdripData) {
-        if (!this.state.timeSensor) {
-          this.state.timeSensor = new Time()
-        }
-        this.state.watchdripData = new WatchdripData(this.state.timeSensor)
+        this.state.watchdripData = new WatchdripData(null)
       }
       const result = this.state.infoFile.fetchJSONResult()
       const data = result && result.data

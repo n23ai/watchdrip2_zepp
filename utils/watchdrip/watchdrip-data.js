@@ -4,7 +4,7 @@ import {MINUTE_IN_MS, niceTime} from "../../shared/date";
 import {TreatmentData} from "./model/treatmentData";
 import {PumpData} from "./model/pumpData";
 
-const BG_STALE_TIME_MS = 13 * MINUTE_IN_MS;
+const BG_STALE_TIME_MS = 5 * MINUTE_IN_MS;
 
 export class WatchdripData {
     constructor(timeSensor) {

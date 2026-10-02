@@ -38,8 +38,16 @@ try {
       caption: {
         color: C.sub,
         fontSize: '13px',
-        lineHeight: '1.4',
+        lineHeight: '18px',
         marginBottom: '8px'
+      },
+      row: {
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: '8px',
+        marginBottom: '4px'
       },
       field: {
         backgroundColor: C.field,
@@ -54,13 +62,6 @@ try {
       fieldValue: {
         color: C.text,
         fontSize: '15px'
-      },
-      row: {
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginTop: '8px'
       },
       btnPrimary: {
         backgroundColor: C.accent,
@@ -80,37 +81,21 @@ try {
         borderRadius: '10px',
         marginTop: '10px'
       },
-      btnBack: {
-        backgroundColor: C.field,
-        color: C.accent,
-        borderRadius: '10px',
-        marginBottom: '14px'
+      logBox: {
+        backgroundColor: '#121214',
+        borderRadius: '8px',
+        padding: '10px',
+        marginTop: '8px',
+        borderWidth: '1px',
+        borderColor: '#2c2c2e'
+      },
+      logText: {
+        color: '#a0a0a5',
+        fontSize: '11px',
+        lineHeight: '16px',
+        fontFamily: 'monospace'
       }
     };
-
-    const toggleView = (on, onClick) => View({
-      style: {
-        width: '46px',
-        height: '28px',
-        borderRadius: '14px',
-        flexShrink: '0',
-        boxSizing: 'border-box',
-        padding: '2px',
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: on ? 'flex-end' : 'flex-start',
-        backgroundColor: on ? C.green : C.line
-      },
-      onClick
-    }, [View({
-      style: {
-        width: '24px',
-        height: '24px',
-        borderRadius: '12px',
-        backgroundColor: '#ffffff'
-      }
-    })]);
 
     AppSettingsPage({
       build(props) {
@@ -118,61 +103,51 @@ try {
           const store = props && props.settingsStorage;
           const get = (k, def = '') => {
             if (!store) return def;
-            const v = store.getItem(k);
-            return (v !== undefined && v !== null && v !== '') ? v : def;
+            try {
+              const v = store.getItem(k);
+              return (v !== undefined && v !== null && v !== '') ? v : def;
+            } catch (e) {
+              return def;
+            }
           };
           const set = (k, v) => {
-            if (store) store.setItem(k, String(v));
+            if (store) {
+              try {
+                store.setItem(k, String(v));
+              } catch (e) {}
+            }
           };
 
-          const view = get('_view', 'main');
+          const parseBool = (v) => {
+            if (v && typeof v === 'object') {
+              if ('value' in v) return Boolean(v.value);
+              if ('checked' in v) return Boolean(v.checked);
+            }
+            return v === true || v === 'true' || v === 1 || v === '1';
+          };
+          const parseStr = (v) => {
+            if (v && typeof v === 'object' && 'value' in v) return String(v.value);
+            return String(v !== undefined && v !== null ? v : '');
+          };
 
-          // Render Logs View
-          if (view === 'logs') {
-            const rawLogs = get('recent_logs', 'Нет логов / No logs');
-            const logsSnippet = String(rawLogs).slice(-4000);
-            return View({ style: S.page }, [
-              Button({
-                label: '‹  Назад в настройки',
-                style: S.btnBack,
-                onClick: () => set('_view', 'main')
-              }),
-              View({ style: S.card }, [
-                Text({ style: S.h1 }, ['Последние события / Recent Logs']),
-                Text({ style: S.caption }, ['Диагностические логи работы WatchDrip2_zepp:']),
-                View({ style: S.field }, [
-                  TextInput({
-                    label: 'Logs',
-                    value: logsSnippet,
-                    rows: 16,
-                    multiline: true,
-                    labelStyle: S.fieldLabel,
-                    subStyle: { color: C.text, fontSize: '11px', fontFamily: 'monospace' },
-                    onChange: () => {}
-                  })
-                ])
-              ]),
-              Button({
-                label: 'Обновить логи (Refresh)',
-                style: S.btnSuccess,
-                onClick: () => set('_view', 'logs')
-              }),
-              Button({
-                label: 'Очистить логи (Clear)',
-                style: S.btnDanger,
-                onClick: () => {
-                  set('recent_logs', '');
-                  set('trigger_clear', Date.now());
-                  set('_view', 'logs');
-                }
-              })
-            ]);
-          }
-
-          // Render Main View
           const serverUrl = get('server_url', 'http://127.0.0.1:29863/');
-          const loggingOn = get('network_logging') === 'true' || get('network_logging') === '1';
+          const rawLogging = get('network_logging', 'false');
+          const loggingOn = rawLogging === 'true' || rawLogging === true || rawLogging === '1';
           const webhookUrl = get('webhook_url', 'http://127.0.0.1:29863/save_logs');
+
+          let logsSnippet = 'Нет логов / No logs';
+          if (store) {
+            try {
+              const rawLogs = store.getItem('recent_logs');
+              if (rawLogs) {
+                const lines = String(rawLogs).trim().split('\n');
+                logsSnippet = lines.slice(-15).join('\n');
+              }
+            } catch (eLogs) {}
+          }
+          if (!logsSnippet || !logsSnippet.trim()) {
+            logsSnippet = 'Нет логов / No logs';
+          }
 
           return View({ style: S.page }, [
             // Card 1: Data Source
@@ -182,9 +157,10 @@ try {
               View({ style: S.field }, [
                 TextInput({
                   label: 'Server URL',
+                  settingsKey: 'server_url',
                   placeholder: 'http://127.0.0.1:29863/',
                   value: serverUrl,
-                  onChange: v => set('server_url', v),
+                  onChange: (v) => set('server_url', parseStr(v)),
                   labelStyle: S.fieldLabel,
                   subStyle: S.fieldValue
                 })
@@ -195,7 +171,7 @@ try {
             View({ style: S.card }, [
               Text({ style: S.h1 }, ['Фоновое обновление / Background Engine']),
               Text({ style: S.caption }, ['Режим: Time.onPerMinute() + Screen Wake']),
-              Text({ style: { color: C.green, fontSize: '13px', lineHeight: '1.4' } }, [
+              Text({ style: { color: C.green, fontSize: '13px', lineHeight: '18px' } }, [
                 '• Фоновые тики каждую минуту через аппаратный RTC\n• Мгновенный опрос при активации экрана (onResume в виджете и циферблате)'
               ])
             ]),
@@ -205,15 +181,20 @@ try {
               Text({ style: S.h1 }, ['Логирование сети (Network Logging)']),
               Text({ style: S.caption }, ['Запись диагностических логов сетевых запросов и BLE пакетов:']),
               View({ style: S.row }, [
-                Text({ style: { color: C.text, fontSize: '15px' } }, ['Запись логов']),
-                toggleView(loggingOn, () => set('network_logging', loggingOn ? 'false' : 'true'))
+                Text({ style: { color: C.text, fontSize: '15px' } }, ['Запись логов: ' + (loggingOn ? 'ВКЛ' : 'ВЫКЛ')]),
+                Toggle({
+                  settingsKey: 'network_logging',
+                  value: loggingOn,
+                  onChange: (v) => set('network_logging', parseBool(v) ? 'true' : 'false')
+                })
               ]),
               View({ style: S.field }, [
                 TextInput({
                   label: 'Webhook URL (для выгрузки логов)',
+                  settingsKey: 'webhook_url',
                   placeholder: 'http://127.0.0.1:29863/save_logs',
                   value: webhookUrl,
-                  onChange: v => set('webhook_url', v),
+                  onChange: (v) => set('webhook_url', parseStr(v)),
                   labelStyle: S.fieldLabel,
                   subStyle: S.fieldValue
                 })
@@ -222,16 +203,13 @@ try {
 
             // Card 4: Log Management
             View({ style: S.card }, [
-              Text({ style: S.h1 }, ['Управление логами']),
-              Button({
-                label: 'Посмотреть логи (View Logs)',
-                style: S.btnPrimary,
-                onClick: () => set('_view', 'logs')
-              }),
+              Text({ style: S.h1 }, ['Управление логами и диагностика']),
               Button({
                 label: 'Отправить логи на Webhook',
                 style: S.btnSuccess,
-                onClick: () => set('trigger_upload', Date.now())
+                onClick: () => {
+                  set('trigger_upload', Date.now());
+                }
               }),
               Button({
                 label: 'Очистить логи (Clear Logs)',
@@ -239,6 +217,22 @@ try {
                 onClick: () => {
                   set('recent_logs', '');
                   set('trigger_clear', Date.now());
+                }
+              })
+            ]),
+
+            // Card 5: Recent Logs Viewer
+            View({ style: S.card }, [
+              Text({ style: S.h1 }, ['Последние события / Recent Logs']),
+              Text({ style: S.caption }, ['Последние 15 строк буфера логов:']),
+              View({ style: S.logBox }, [
+                Text({ paragraph: true, style: S.logText }, [logsSnippet])
+              ]),
+              Button({
+                label: 'Обновить просмотр логов',
+                style: S.btnPrimary,
+                onClick: () => {
+                  set('_refresh', Date.now());
                 }
               })
             ])
@@ -258,5 +252,3 @@ try {
 } catch (e) {
   console.log('AppSettingsPage fatal: ' + e);
 }
-
-

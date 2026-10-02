@@ -3,8 +3,7 @@ import {
     WATCHDRIP_SETTINGS_DEFAULTS,
     WF_CONFIG_FILE,
 } from "../config/global-constants";
-
-import * as fs from "./../../shared/fs";
+ 
 import {Path} from "../path";
 
 let file;

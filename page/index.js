@@ -32,8 +32,7 @@ import {
     TITLE_TEXT,
     VERSION_TEXT,
 } from "../utils/config/styles";
-
-import * as fs from "./../shared/fs";
+ 
 import {WatchdripData} from "../utils/watchdrip/watchdrip-data";
 import {getDataTypeConfig, img} from "../utils/helper";
 import {gotoSubpage} from "../shared/navigate";
@@ -56,7 +55,7 @@ const logger = log.getLogger("watchdrip_app");
 const ENABLE_TREATMENT_UI = false;
 const BG_SERVICE_PERMISSION = 'device:os.bg_service';
 const BG_SERVICE_FILE = 'app-service/index';
-const BG_SERVICE_PARAM = 'mode=continuous&source=manual';
+const BG_SERVICE_PARAM = 'mode=continuous&source=manual&action=force_fetch';
 const BG_SERVICE_VERIFY_DELAY_MS = 1500;
 const BG_SERVICE_RETRY_DELAY_MS = 2000;
 const BG_SERVICE_MAX_ATTEMPTS = 2;
@@ -194,10 +193,12 @@ function startWatchdripBackgroundService(onReady, attempt = 1, run = 0) {
         if (serviceList && isWatchdripServiceRunning(serviceList)) {
             bgPageLog('ALREADY_RUNNING', 'run=' + operationRun + ' attempt=' + attempt);
             try {
-                startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
-            } catch (eForce) {
-                bgPageLog('FORCE_FETCH_ERROR', formatError(eForce));
-            }
+                startAppService({
+                    file: BG_SERVICE_FILE,
+                    param: 'mode=continuous&action=force_fetch',
+                    complete_func: () => {}
+                });
+            } catch (eParam) {}
             finishBackgroundServiceEnsure(operationRun, attempt, true, onReady, 'already_running');
             return;
         }
@@ -356,20 +357,6 @@ class Watchdrip {
                 }
             });
             this.startDataUpdates();
-
-            // If data is stale or missing on foreground open, trigger background force_fetch and poll cache
-            const bgObj = this.watchdripData.getBg();
-            const bgTime = bgObj ? Number(bgObj.time) : 0;
-            const isStale = !bgTime || (Date.now() - bgTime > 60000);
-            if (isStale) {
-                console.log("watchdrip app: foreground open with stale data, triggering force_fetch & cache refresh");
-                try {
-                    startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
-                } catch (eForce) {
-                    console.log("watchdrip app: startAppService force_fetch error: " + eForce);
-                }
-                this.schedulePostStartCacheRefresh();
-            }
         }
 
         createWidget(widget.BUTTON, {
@@ -524,13 +511,10 @@ class Watchdrip {
         const bgTime = this.watchdripData.getBg() ? this.watchdripData.getBg().time : null;
         const bgAgeMs = bgTime ? Date.now() - Number(bgTime) : Infinity;
 
-        // If BG data is older than 2 minutes or periodic refresh needed, trigger force_fetch and cache refresh
+        // If BG data is older than 2 minutes or periodic refresh needed, trigger cache refresh
         if (bgAgeMs > 2 * 60 * 1000 || !this.lastUpdateAttempt || (Date.now() - this.lastUpdateAttempt > 60 * 1000)) {
-            debug.log("data stale or periodic refresh needed, triggering force_fetch");
+            debug.log("data stale or periodic refresh needed, polling cache");
             this.lastUpdateAttempt = Date.now();
-            try {
-                startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
-            } catch (eForce) {}
             this.schedulePostStartCacheRefresh();
         }
     }
@@ -690,13 +674,17 @@ class Watchdrip {
 
     fetchRemoteInfo(options = {}) {
         const onDone = typeof options.onDone === "function" ? options.onDone : null;
-        debug.log("fetchRemoteInfo routed to background service");
-        this.lastUpdateAttempt = Date.now();
+        debug.log("fetchRemoteInfo triggering force_fetch on background service");
         try {
-            startAppService({ file: BG_SERVICE_FILE, param: 'action=force_fetch' });
-        } catch (eForce) {
-            debug.log("startAppService force_fetch error: " + eForce);
+            startAppService({
+                file: BG_SERVICE_FILE,
+                param: 'mode=continuous&action=force_fetch',
+                complete_func: () => {}
+            });
+        } catch (eFetch) {
+            debug.log("fetchRemoteInfo startAppService error: " + eFetch);
         }
+        this.lastUpdateAttempt = Date.now();
         this.schedulePostStartCacheRefresh();
         if (onDone) {
             this.globalNS.setTimeout(onDone, 2000);

@@ -61,6 +61,16 @@ python3 /Users/nikolaj/Documents/dev/zepp/simulator/install_android_cheetah.py
 
 Installs the latest package on the connected real watch through the Android bridge helper.
 
+```bash
+# Universal Bridge Monitor & Screenshot Tool (Do NOT create ad-hoc python scripts in this repo):
+# Instant screenshot:
+python3 /Users/nikolaj/Documents/dev/zepp/simulator/zeus_monitor.py --screenshot -o /path/to/screen.png
+# Observation session (10m) with periodic screenshots and logging:
+python3 /Users/nikolaj/Documents/dev/zepp/simulator/zeus_monitor.py --duration 10m --screenshot-interval 3m --log /tmp/bridge.log
+# Filter background ticks and BLE traffic:
+python3 /Users/nikolaj/Documents/dev/zepp/simulator/zeus_monitor.py --duration 15m --filter "onPerMinute,CMD_GET_INFO,WD_BG,processInfo" -q
+```
+
 `npm test` is currently a placeholder and exits with an error. `test_logs.js` is a local diagnostic helper, not a formal test suite.
 
 ## Coding Style & Naming Conventions

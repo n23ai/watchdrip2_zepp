@@ -5,7 +5,6 @@ import {
   mkdirSync, 
   readdirSync, 
   rmSync, 
-  renameSync,
   openSync,
   readSync,
   writeSync,
@@ -133,7 +132,18 @@ export class Path {
     }
 
     fetchText(limit = Infinity) {
-        // 1. Primary: openSync + readSync into ArrayBuffer (fast & reliable on Zepp OS 3+/4+)
+        // 1. Primary: readFileSync with utf8 encoding option (official Zepp OS standard)
+        try {
+            const res = readFileSync({
+                path: this.relativePath,
+                options: { encoding: 'utf8' }
+            });
+            if (typeof res === 'string' && res.length > 0) {
+                return res;
+            }
+        } catch (eRes) {}
+
+        // 2. Candidate paths with openSync + readSync into ArrayBuffer
         const pathCandidates = [
             this.relativePath,
             'data://' + this.relativePath,
@@ -154,10 +164,10 @@ export class Path {
                     const buf = new ArrayBuffer(16384);
                     let bytesRead = 0;
                     try {
-                        bytesRead = readSync({ fd: Number(fd), buffer: buf });
+                        bytesRead = readSync({ fd: Number(fd), buffer: buf, options: { length: buf.byteLength } });
                     } catch (eR1) {
                         try {
-                            bytesRead = readSync({ fd: fd, buffer: buf });
+                            bytesRead = readSync({ fd: fd, buffer: buf, options: { length: buf.byteLength } });
                         } catch (eR2) {
                             bytesRead = 0;
                         }
@@ -183,7 +193,7 @@ export class Path {
             }
         }
 
-        // 2. Fallback: readFileSync raw buffer
+        // 3. Fallback: readFileSync raw buffer
         try {
             const raw = readFileSync({ path: this.relativePath });
             if (typeof raw === 'string' && raw.length > 0) {
@@ -197,17 +207,6 @@ export class Path {
                 }
             }
         } catch (eRaw) {}
-
-        // 3. Fallback: readFileSync with utf8 encoding option
-        try {
-            const res = readFileSync({
-                path: this.relativePath,
-                options: { encoding: 'utf8' }
-            });
-            if (typeof res === 'string' && res.length > 0) {
-                return res;
-            }
-        } catch (eRes) {}
 
         return null;
     }
@@ -248,40 +247,13 @@ export class Path {
             text = String(text !== undefined && text !== null ? text : '');
         }
         try {
-            const buf = FsTools.str2ab(text);
-            const tmpPath = this.relativePath + '.tmp';
-            
-            // 1. Write to temporary file as binary ArrayBuffer
             writeFileSync({
-                path: tmpPath,
-                data: buf
+                path: this.relativePath,
+                data: text,
+                options: { encoding: 'utf8' }
             });
-            
-            // 2. Verify temporary file was written
-            const st = statSync({ path: tmpPath });
-            const writtenSize = st ? st.size : 0;
-            console.log('[PATH overrideWithText] tmp=' + tmpPath + ' target=' + this.relativePath + ' bufLen=' + buf.byteLength + ' stat_size=' + writtenSize);
-            
-            if (writtenSize > 0 || buf.byteLength === 0) {
-                try {
-                    rmSync({ path: this.relativePath });
-                } catch (eRm) {}
-                const renRes = renameSync({
-                    oldPath: tmpPath,
-                    newPath: this.relativePath
-                });
-                console.log('[PATH overrideWithText] renameSync=' + renRes);
-                return true;
-            } else {
-                console.log('[PATH overrideWithText] tmp size 0, writing directly');
-                writeFileSync({
-                    path: this.relativePath,
-                    data: buf
-                });
-                return true;
-            }
-        } catch (e) {
-            console.log('[PATH overrideWithText error] ' + e);
+            return true;
+        } catch (eDirect) {
             try {
                 const buf = FsTools.str2ab(text);
                 writeFileSync({
@@ -289,8 +261,8 @@ export class Path {
                     data: buf
                 });
                 return true;
-            } catch (e2) {
-                console.log('[PATH overrideWithText direct error] ' + e2);
+            } catch (eDirect2) {
+                console.log('[PATH overrideWithText error] ' + eDirect2);
                 return false;
             }
         }

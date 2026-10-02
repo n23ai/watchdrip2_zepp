@@ -1,52 +1,75 @@
 import { log } from '@zos/utils'
+import { writeFileSync, statSync } from '@zos/fs'
 import { MessageBuilder } from "../shared/message"
 import { getPackageInfo } from '@zos/app'
 import { WF_INFO_FILE, WATCHDRIP_ALARM_SETTINGS_DEFAULTS } from "../utils/config/global-constants"
 import { Commands } from "../utils/config/constants"
 import { WatchdripConfig } from "../utils/watchdrip/config"
 import { Time } from '@zos/sensor'
-import { Path } from "../utils/path"
 import { markBackgroundDebug } from "../utils/watchdrip/background-debug"
 import { formatSugarLog } from "../shared/log-format"
-import { getSettings as getDisplaySettings } from '@zos/display'
-
+import { FsTools } from "../utils/path"
 console.log("watchdrip service: module loading start")
 const logger = log.getLogger("watchdrip_service")
 const ble = require('@zos/ble')
 
-let timeSensor = null
+let rawTimeSensor = null
 try {
-  timeSensor = new Time()
+  rawTimeSensor = new Time()
   console.log("watchdrip service: Time sensor instantiated")
 } catch (eTime) {
   console.log("watchdrip service: error creating Time sensor: " + eTime)
 }
+const timeSensor = rawTimeSensor
 
 let messageBuilder = null
 let conf = null
 let isMinuteSubscribed = false
-let infoFile = null
 let fetchInFlight = false
 let lastFetchStarted = 0
-let fetchWatchdogTimer = null
-let heartbeatTimer = null
 let lastMinuteTick = 0
-
-const FETCH_TIMEOUT_MS = 15000
+let cancelActiveRequest = null
+let lastSavedSignature = { time: null, val: null, isError: null }
 
 function onMinuteCallback() {
   lastMinuteTick = Date.now()
-  logger.log('onPerMinute tick')
-  console.log('watchdrip service onPerMinute tick')
-  markBackgroundDebug('service_minute_tick', { minute: timeSensor ? timeSensor.getMinutes() : -1 }, Date.now())
+  const minute = timeSensor ? timeSensor.getMinutes() : -1
+  const bleStatus = ble && typeof ble.connectStatus === 'function' ? ble.connectStatus() : 'na'
+  const currentPort2 = messageBuilder ? messageBuilder.appSidePort : 0
+  const tickLog = '[WD_TICK] min=' + minute + ' ble=' + bleStatus + ' port2=' + currentPort2 + ' inFlight=' + fetchInFlight
+  logger.log(tickLog)
+  console.log('watchdrip service ' + tickLog)
+  markBackgroundDebug('service_minute_tick', { minute, bleStatus, port2: currentPort2 }, Date.now())
+
+  if (fetchInFlight) {
+    const inFlightAge = Date.now() - lastFetchStarted
+    if (inFlightAge > 15000) {
+      console.log('watchdrip service: watchdog recovery stale fetch age=' + inFlightAge + 'ms')
+      logger.log('Watchdog: fetch stuck for ' + inFlightAge + 'ms, resetting connection')
+      markBackgroundDebug('fetch_stale_watchdog_15s', { age: inFlightAge }, Date.now())
+      if (cancelActiveRequest) {
+        try { cancelActiveRequest() } catch (eCancel) {}
+        cancelActiveRequest = null
+      }
+      if (messageBuilder) {
+        try { messageBuilder.resetConnection('watchdog_stale_15s') } catch (eReset) {}
+      }
+      fetchInFlight = false
+    } else {
+      logger.log('fetch in flight, skipping tick')
+      return
+    }
+  }
+
+  if (messageBuilder && (!messageBuilder.ready || messageBuilder.appSidePort === 0)) {
+    try { messageBuilder.sendShake() } catch (eShake) {}
+  }
+
   fetchInfo(false)
 }
 
 function applyTimerConfig(configuredMode = 'on_per_minute') {
   // Requirement: Strictly use Time.onPerMinute() as the sole background update engine
-  if (!timeSensor) {
-    try { timeSensor = new Time() } catch (e) {}
-  }
   if (!isMinuteSubscribed && timeSensor) {
     try {
       timeSensor.onPerMinute(onMinuteCallback)
@@ -63,55 +86,10 @@ function applyTimerConfig(configuredMode = 'on_per_minute') {
   markBackgroundDebug('timer_engine_on_per_minute', { mode: configuredMode }, Date.now())
 }
 
-function startHeartbeat() {
-  stopHeartbeat()
-  heartbeatTimer = setTimeout(function heartbeat() {
-    const now = Date.now()
-    let isScreenOn = false
-    try {
-      const display = getDisplaySettings()
-      isScreenOn = display && display.screen && display.screen.status === 1
-    } catch (e) {}
-
-    const dataAge = lastFetchStarted ? (now - lastFetchStarted) : Infinity
-
-    // If screen is ON and data is older than 60 seconds (or not yet fetched), trigger immediate fetch
-    if (isScreenOn && dataAge >= 60000 && !fetchInFlight) {
-      console.log('watchdrip service: screen ON with stale data (age=' + Math.round(dataAge / 1000) + 's), triggering fetch')
-      logger.log('screen ON fetch triggered (age=' + Math.round(dataAge / 1000) + 's)')
-      fetchInfo(true)
-    } else if (lastMinuteTick && (now - lastMinuteTick > 95000)) {
-      // Watchdog for onPerMinute: if more than 95 seconds have passed without a tick
-      console.log('watchdrip service: onPerMinute watchdog stale, triggering fetch')
-      logger.warn('onPerMinute watchdog stale, triggering fetch')
-      fetchInfo(false)
-      lastMinuteTick = now
-    }
-
-    const nextInterval = isScreenOn ? 10000 : 30000
-    heartbeatTimer = setTimeout(heartbeat, nextInterval)
-  }, 10000)
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) {
-    clearTimeout(heartbeatTimer)
-    heartbeatTimer = null
-  }
-}
-
-function finishServiceIfNeeded() {
-  if (fetchWatchdogTimer) {
-    clearTimeout(fetchWatchdogTimer)
-    fetchWatchdogTimer = null
-  }
-}
-
 function saveFetchState(stage, fields = {}) {
   const now = Date.now()
   const debug = markBackgroundDebug(stage, fields, now)
   if (conf && debug) {
-    conf.read()
     conf.backgroundDebug = debug
   }
   return now
@@ -122,21 +100,132 @@ function markFetchFailure(stage, error) {
   if (conf) {
     conf.infoLastUpdAttempt = now
     conf.infoLastUpdSucess = false
-    conf.save()
   }
+}
+
+function ensureInitialInfoFile() {
+  try {
+    let fileSize = 0
+    try {
+      const st = statSync({ path: WF_INFO_FILE })
+      fileSize = st ? st.size : 0
+    } catch (eStat) {}
+    if (fileSize < 20) {
+      console.log('watchdrip service initializing fallback info.json')
+      const fallbackObj = {
+        bg: {
+          val: '--',
+          time: 0,
+          isStale: true,
+          trend: 'None'
+        },
+        status: {
+          now: Date.now()
+        }
+      }
+      writeFileSync({
+        path: WF_INFO_FILE,
+        data: JSON.stringify(fallbackObj),
+        options: { encoding: 'utf8' }
+      })
+    }
+  } catch (e) {
+    logger.error('ensureInitialInfoFile error: ' + e)
+  }
+}
+
+function saveInfoFile(jsonString, newInfo = null) {
+  if (!newInfo && typeof jsonString === 'string') {
+    try {
+      newInfo = JSON.parse(jsonString)
+    } catch (e) {
+      newInfo = null
+    }
+  } else if (!newInfo && typeof jsonString === 'object') {
+    newInfo = jsonString
+  }
+
+  const bg = newInfo && typeof newInfo === 'object' && newInfo.bg ? newInfo.bg : null
+
+  let currentFileSize = 0
+  try {
+    const st = statSync({ path: WF_INFO_FILE })
+    currentFileSize = st ? st.size : 0
+  } catch (eSt) {}
+
+  if (currentFileSize > 20 && bg && lastSavedSignature.time !== null) {
+    const bgTime = bg.time !== undefined ? bg.time : null
+    const bgVal = bg.val !== undefined ? bg.val : null
+    const bgIsError = bg.isError !== undefined ? bg.isError : null
+
+    if (
+      bgTime === lastSavedSignature.time &&
+      bgVal === lastSavedSignature.val &&
+      bgIsError === lastSavedSignature.isError
+    ) {
+      logger.log('SmartFlush: skip write, data unchanged')
+      console.log('watchdrip service SmartFlush: skip write, data unchanged')
+      return 0
+    }
+  }
+
+  const dataToWrite = typeof jsonString === 'string' ? jsonString : JSON.stringify(jsonString)
+  if (!dataToWrite || dataToWrite.length < 20) {
+    logger.error('[SAVE_INFO] skip write: dataToWrite too short or empty')
+    return 0
+  }
+
+  let writeSuccess = false
+  try {
+    writeFileSync({
+      path: WF_INFO_FILE,
+      data: dataToWrite,
+      options: { encoding: 'utf8' }
+    })
+    writeSuccess = true
+  } catch (e1) {
+    logger.error('[SAVE_INFO] utf8 write error: ' + e1)
+    try {
+      const buf = FsTools.str2ab(dataToWrite)
+      writeFileSync({
+        path: WF_INFO_FILE,
+        data: buf
+      })
+      writeSuccess = true
+    } catch (e2) {
+      logger.error('[SAVE_INFO] ArrayBuffer write error: ' + e2)
+    }
+  }
+
+  if (writeSuccess && bg) {
+    lastSavedSignature = {
+      time: bg.time !== undefined ? bg.time : null,
+      val: bg.val !== undefined ? bg.val : null,
+      isError: bg.isError !== undefined ? bg.isError : null,
+    }
+  }
+
+  let finalSize = 0
+  try {
+    const stFinal = statSync({ path: WF_INFO_FILE })
+    finalSize = stFinal ? stFinal.size : 0
+  } catch (eFinal) {}
+  logger.log('[SAVE_INFO] final info.json size=' + finalSize)
+  console.log('watchdrip service [SAVE_INFO] final info.json size=' + finalSize)
+  return finalSize
 }
 
 function fetchInfo(force = false) {
   try {
     const now = Date.now()
-    const minInterval = force ? 5000 : 20000
+    const minInterval = force ? 4000 : 10000
     if (lastFetchStarted && (now - lastFetchStarted) < minInterval) {
       logger.log('fetchInfo skipped: too soon (' + (now - lastFetchStarted) + 'ms)')
       return
     }
     if (fetchInFlight) {
       const inFlightAge = now - lastFetchStarted
-      const staleThreshold = force ? 10000 : 20000
+      const staleThreshold = force ? 10000 : 15000
       if (inFlightAge < staleThreshold) {
         logger.log('fetchInfo skipped: in flight (' + inFlightAge + 'ms)')
         return
@@ -144,6 +233,13 @@ function fetchInfo(force = false) {
       console.log('watchdrip service recovering stale fetch age=' + inFlightAge)
       logger.log('recovering stale fetch age=' + inFlightAge)
       markBackgroundDebug('fetch_stale_recovered', { age: inFlightAge }, now)
+      if (cancelActiveRequest) {
+        try { cancelActiveRequest() } catch (eCancel) {}
+        cancelActiveRequest = null
+      }
+      if (messageBuilder) {
+        try { messageBuilder.resetConnection('fetch_stale_recovered') } catch (eReset) {}
+      }
       fetchInFlight = false
     }
     logger.log('fetchInfo triggered' + (force ? ' (forced)' : ''))
@@ -151,19 +247,6 @@ function fetchInfo(force = false) {
     markBackgroundDebug('fetch_start', { force: !!force }, now)
     fetchInFlight = true
     lastFetchStarted = now
-
-    if (fetchWatchdogTimer) {
-      clearTimeout(fetchWatchdogTimer)
-      fetchWatchdogTimer = null
-    }
-    fetchWatchdogTimer = setTimeout(() => {
-      if (!fetchInFlight) return
-      fetchInFlight = false
-      console.log("watchdrip service fetch watchdog timeout")
-      logger.log("fetch watchdog timeout")
-      markFetchFailure('fetch_watchdog_timeout', 'no response before watchdog')
-      finishServiceIfNeeded()
-    }, FETCH_TIMEOUT_MS + 5000)
 
     let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams
     if (conf && conf.alarmSettings && conf.alarmSettings.fetchParams) {
@@ -186,20 +269,16 @@ function fetchInfo(force = false) {
       }
     }
 
-    messageBuilder.requestCb({
+    cancelActiveRequest = messageBuilder.requestCb({
       method: Commands.getInfo,
       params: fetchParams,
-    }, { timeout: FETCH_TIMEOUT_MS }, (error, data) => {
-      if (fetchWatchdogTimer) {
-        clearTimeout(fetchWatchdogTimer)
-        fetchWatchdogTimer = null
-      }
+    }, { timeout: 15000 }, (error, data) => {
+      cancelActiveRequest = null
       fetchInFlight = false
       if (error) {
         console.log("watchdrip service fetch error: " + error)
         logger.log("fetch error: " + error)
         markFetchFailure('fetch_error', String(error))
-        finishServiceIfNeeded()
         return
       }
       logger.log("received data")
@@ -207,51 +286,45 @@ function fetchInfo(force = false) {
       markBackgroundDebug('fetch_received', {}, Date.now())
 
       let { result: info = {}, meta = {} } = data || {}
-      if (meta && meta.timerType && conf) {
-        conf.read()
-        if (conf.settings && conf.settings.timerType !== meta.timerType) {
-          console.log('watchdrip service: timerType config updated from phone: ' + meta.timerType)
-          logger.log('timerType updated from phone: ' + meta.timerType)
-          conf.settings.timerType = meta.timerType
-          conf.save()
-          applyTimerConfig(meta.timerType)
-        }
+      if (meta && meta.timerType && conf && conf.settings && conf.settings.timerType !== meta.timerType) {
+        console.log('watchdrip service: timerType config updated from phone: ' + meta.timerType)
+        logger.log('timerType updated from phone: ' + meta.timerType)
+        conf.settings.timerType = meta.timerType
+        applyTimerConfig(meta.timerType)
       }
       if (info && !info.error) {
         try {
-          if (typeof info === 'string') {
-            infoFile.overrideWithText(info)
+          const infoObj = typeof info === 'string' ? JSON.parse(info) : info
+          const jsonString = typeof info === 'string' ? info : JSON.stringify(info)
+          const savedSize = saveInfoFile(jsonString, infoObj)
+          if (savedSize === 0) {
+            markBackgroundDebug('fetch_smart_flush_skip', { val: infoObj && infoObj.bg && infoObj.bg.val }, Date.now())
           } else {
-            infoFile.overrideWithJSON(info)
+            const debug = markBackgroundDebug('fetch_saved', { result: 'ok', infoType: typeof info, bytes: savedSize }, Date.now())
+            if (conf && debug) conf.backgroundDebug = debug
           }
-          const debug = markBackgroundDebug('fetch_saved', { result: 'ok', infoType: typeof info }, Date.now())
           if (conf) {
-            conf.read()
             conf.infoLastUpdAttempt = Date.now()
             conf.infoLastUpd = conf.infoLastUpdAttempt
             conf.infoLastUpdSucess = true
-            if (debug) conf.backgroundDebug = debug
-            conf.save()
           }
-          const sugarLogLine = formatSugarLog('[WD_BG SERVICE WRITE]', info, { file: WF_INFO_FILE })
+          const sugarLogLine = formatSugarLog('[WD_BG SERVICE WRITE]', info, { file: WF_INFO_FILE, flush: savedSize === 0 ? 'SKIPPED' : 'WRITTEN' })
           console.log(sugarLogLine)
           logger.log(sugarLogLine)
-          console.log("watchdrip service saved info.json successfully")
-          logger.log("saved info.json successfully")
-          finishServiceIfNeeded()
+          if (savedSize > 0) {
+            console.log("watchdrip service saved info.json successfully bytes=" + savedSize)
+            logger.log("saved info.json successfully bytes=" + savedSize)
+          }
         } catch (e) {
           markFetchFailure('fetch_save_error', String(e))
-          finishServiceIfNeeded()
         }
       } else {
         logger.log("error in result: " + JSON.stringify(info))
         markFetchFailure('fetch_result_error', JSON.stringify(info))
-        finishServiceIfNeeded()
       }
     })
   } catch (e) {
     markBackgroundDebug('fetch_catch_sync', { error: String(e) }, Date.now())
-    finishServiceIfNeeded()
   }
 }
 
@@ -277,14 +350,13 @@ AppService({
 
   onInit(params) {
     try {
-      console.log('watchdrip Service onInit')
-      logger.log('Service onInit')
+      console.log('watchdrip Service onInit: ' + params)
+      logger.log('Service onInit: ' + params)
 
       markBackgroundDebug('service_onInit', { params: String(params || ''), result: 'continuous' }, Date.now())
       conf = new WatchdripConfig()
       conf.read()
-
-      infoFile = new Path("full", WF_INFO_FILE)
+      ensureInitialInfoFile()
 
       const { appId } = getPackageInfo()
       messageBuilder = new MessageBuilder({ appId, ble })
@@ -296,9 +368,6 @@ AppService({
       const configuredTimerType = (conf.settings && conf.settings.timerType) || 'on_per_minute'
       applyTimerConfig(configuredTimerType)
       markBackgroundDebug('service_time_ready', { engine: 'on_per_minute' }, Date.now())
-
-      // Start periodic heartbeat to keep process alive in OS scheduler
-      startHeartbeat()
 
       // Initial fetch
       const paramStr = typeof params === 'string' ? params : ''
@@ -317,13 +386,12 @@ AppService({
     console.log('watchdrip service onDestroy')
     logger.log('Service onDestroy')
     markBackgroundDebug('service_onDestroy', {}, Date.now())
-    stopHeartbeat()
+    if (cancelActiveRequest) {
+      try { cancelActiveRequest(); } catch (eCancel) {}
+      cancelActiveRequest = null
+    }
     if (messageBuilder) {
       messageBuilder.disConnect()
-    }
-    if (fetchWatchdogTimer) {
-      clearTimeout(fetchWatchdogTimer)
-      fetchWatchdogTimer = null
     }
     fetchInFlight = false
   }
