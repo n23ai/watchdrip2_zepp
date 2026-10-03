@@ -1,9 +1,0 @@
-  - Enter 'help' to view the command.
-bridge$ connect
-[8D[8C[1000D[Kbridge$ c[9D[9C[1000D[Kbridge$ co[10D[10C[1000D[Kbridge$ con[11D[11C[1000D[Kbridge$ conn[12D[12C[1000D[Kbridge$ conne[13D[13C[1000D[Kbridge$ connec[14D[14C[1000D[Kbridge$ connect[15D[15C[1000D[Kbridge$ connect[15D[15C
-bridge$ [8D[8C[ℹ] successfully connected to app-Android.
-screenshot
-[1000D[Kbridge$ s[9D[9C[1000D[Kbridge$ sc[10D[10C[1000D[Kbridge$ scr[11D[11C[1000D[Kbridge$ scre[12D[12C[1000D[Kbridge$ scree[13D[13C[1000D[Kbridge$ screen[14D[14C[1000D[Kbridge$ screens[15D[15C[1000D[Kbridge$ screensh[16D[16C[1000D[Kbridge$ screensho[17D[17C[1000D[Kbridge$ screenshot[18D[18C[1000D[Kbridge$ screenshot[18D[18C
-Waiting...
-bridge$ [8D[8C[✔] screenShot path:/Users/nikolaj/desktop/screenShot.png
-exit

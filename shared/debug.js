@@ -1,13 +1,11 @@
 import { zeroPad } from "./date";
 import { DEBUG_TEXT } from "../utils/config/styles";
 import { createWidget, widget as zosWidget, prop } from "@zos/ui";
-import { Time } from "@zos/sensor";
 import { getScene, SCENE_AOD } from "@zos/app";
 import { log as zosLog } from "@zos/utils";
 
 export class DebugText {
     constructor() {
-        this.t = new Time();
         this.debugTextText = "";
         this.widget = createWidget(zosWidget.TEXT, DEBUG_TEXT);
         this.lines = 0;

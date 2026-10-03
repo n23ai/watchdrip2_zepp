@@ -961,6 +961,11 @@ export class MessageBuilder extends EventBus {
       opts = Object.assign(defaultOpts, opts)
     }
 
+    // App Service has no JS timers (spec guides/framework.md:189). Callers running
+    // inside App Service pass noTimers: true and expire requests by deadline on
+    // their own Time.onPerMinute tick instead of relying on setTimeout.
+    const timersAvailable = !opts.noTimers && typeof setTimeout === 'function'
+
     let cancelled = false
     let hasReturned = false
     let timer1 = null
@@ -1032,7 +1037,7 @@ export class MessageBuilder extends EventBus {
         this.off('error', onError)
       }
 
-      if (opts.timeout > 0) {
+      if (opts.timeout > 0 && timersAvailable) {
         const elapsed = Date.now() - startTime
         const remaining = opts.timeout - elapsed
         if (remaining <= 0) {
@@ -1054,7 +1059,7 @@ export class MessageBuilder extends EventBus {
       if (this.ready && this.appSidePort !== 0) {
         _requestCb()
       } else {
-        if (opts.timeout > 0) {
+        if (opts.timeout > 0 && timersAvailable) {
           readyTimer = setTimeout(() => {
             readyTimer = null
             if (cancelReady) {

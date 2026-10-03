@@ -1,5 +1,6 @@
 import {DebugText} from "../shared/debug";
 import {getGlobal} from "../shared/global";
+import { MessageBuilder } from "../shared/message";
 import { getText } from "@zos/i18n";
 import {
     Colors,
@@ -43,7 +44,7 @@ import {formatLogLine} from "../shared/log-format";
 import {DEVICE_WIDTH} from "../utils/config/device";
 
 import { createWidget, widget, prop, setLayerScrolling, setStatusBarVisible, updateStatusBarTitle, align, text_style } from '@zos/ui'
-import { Time, Vibrator } from '@zos/sensor'
+import { Vibrator } from '@zos/sensor'
 import { queryPermission, requestPermission, getPackageInfo } from '@zos/app'
 import { getAllAppServices, start as startAppService, stop as stopAppService } from '@zos/app-service'
 import { goBack, home } from '@zos/router'
@@ -59,9 +60,16 @@ const BG_SERVICE_PARAM = 'mode=continuous&source=manual&action=force_fetch';
 const BG_SERVICE_VERIFY_DELAY_MS = 1500;
 const BG_SERVICE_RETRY_DELAY_MS = 2000;
 const BG_SERVICE_MAX_ATTEMPTS = 2;
-const CACHE_READ_RETRY_DELAYS_MS = [250, 750, 1500, 2500];
-const POST_START_CACHE_REFRESH_DELAYS_MS = [500, 1200, 2000, 3000, 4500, 6500, 10000, 15000];
+const CACHE_READ_RETRY_DELAYS_MS = [600, 1500, 3000];
+const POST_START_CACHE_REFRESH_DELAYS_MS = [2000, 3500, 5000, 7500, 11000, 16000];
 const AGE_REFRESH_INTERVAL_MS = 10000;
+// Foreground BLE ownership (approved deviation from AGENTS.md rule 14, see walkthrough):
+// while the page is open, Zepp OS suspends the App Service (no ticks, no BLE callbacks),
+// so the page fetches from the phone itself and writes info.json.
+const FG_FETCH_INTERVAL_MS = 60000;
+const FG_FETCH_FIRST_DELAY_MS = 3000;
+const FG_FETCH_TIMEOUT_MS = 15000;
+const ble = require('@zos/ble');
 
 var debug = null;
 var watchdrip = null;
@@ -253,7 +261,9 @@ const FetchMode = {DISPLAY: 'display', HIDDEN: 'hidden'};
 class Watchdrip {
     constructor() {
         this.createWatchdripDir();
-        this.timeSensor = new Time();
+        // Only getTime() is used here; avoid creating a second native Time sensor in the
+        // same app while the App Service owns Time.onPerMinute (plan R3b).
+        this.timeSensor = { getTime: () => Date.now() };
         this.vibrate = new Vibrator();
         this.globalNS = getGlobal();
         this.goBackType = GoBackType.NONE;
@@ -271,6 +281,11 @@ class Watchdrip {
         this.cacheSnapshotKey = null;
         this.cacheRefreshActive = false;
         this.destroyed = false;
+        this.fgMessageBuilder = null;
+        this.fgFetchInFlight = false;
+        this.fgFetchStarted = 0;
+        this.fgFetchSeq = 0;
+        this.fgFirstFetchTimer = null;
         this.serviceDebugTextWidget = null;
         this.updateIntervals = DATA_UPDATE_INTERVAL_MS;
         this.fetchMode = FetchMode.DISPLAY;
@@ -357,6 +372,10 @@ class Watchdrip {
                 }
             });
             this.startDataUpdates();
+            this.fgFirstFetchTimer = this.globalNS.setTimeout(() => {
+                this.fgFirstFetchTimer = null;
+                this.foregroundFetch('open');
+            }, FG_FETCH_FIRST_DELAY_MS);
         }
 
         createWidget(widget.BUTTON, {
@@ -511,6 +530,11 @@ class Watchdrip {
         const bgTime = this.watchdripData.getBg() ? this.watchdripData.getBg().time : null;
         const bgAgeMs = bgTime ? Date.now() - Number(bgTime) : Infinity;
 
+        // Page is foreground: the App Service is suspended, so fetch over BLE directly.
+        if (bgAgeMs > FG_FETCH_INTERVAL_MS) {
+            this.foregroundFetch('stale');
+        }
+
         // If BG data is older than 2 minutes or periodic refresh needed, trigger cache refresh
         if (bgAgeMs > 2 * 60 * 1000 || !this.lastUpdateAttempt || (Date.now() - this.lastUpdateAttempt > 60 * 1000)) {
             debug.log("data stale or periodic refresh needed, polling cache");
@@ -587,7 +611,7 @@ class Watchdrip {
         if (!this.cacheRefreshActive) {
             this.finishLocalInfoRead();
         }
-        this.fetchRemoteInfo();
+        this.foregroundFetch('cache_missing');
     }
 
     finishLocalInfoRead() {
@@ -670,6 +694,99 @@ class Watchdrip {
 
         this.cacheRefreshTimer = this.globalNS.setTimeout(refresh,
             POST_START_CACHE_REFRESH_DELAYS_MS[attempt]);
+    }
+
+    getForegroundMessageBuilder() {
+        if (!this.fgMessageBuilder) {
+            const { appId } = getPackageInfo();
+            this.fgMessageBuilder = new MessageBuilder({ appId, ble });
+            this.fgMessageBuilder.connect();
+            console.log('[WD_PAGE] fg ble connect');
+        }
+        return this.fgMessageBuilder;
+    }
+
+    // Re-register the single C-level BLE receiver for the page. The App Service does the
+    // same at the start of each of its fetch cycles: whoever starts a request owns the answer.
+    bindForegroundBle() {
+        const mb = this.getForegroundMessageBuilder();
+        try {
+            ble.createConnect((index, data, size) => {
+                if (this.fgMessageBuilder) this.fgMessageBuilder.onFragmentData(data);
+            });
+        } catch (e) {
+            console.log('[WD_PAGE] fg ble bind error=' + e);
+        }
+        return mb;
+    }
+
+    foregroundFetch(reason) {
+        if (this.destroyed || this.conf.settings.disableUpdates) return;
+        const now = Date.now();
+        if (this.fgFetchInFlight && now - this.fgFetchStarted < FG_FETCH_TIMEOUT_MS + 2000) {
+            return;
+        }
+        if (this.fgFetchStarted && now - this.fgFetchStarted < 25000) {
+            return;
+        }
+        const mb = this.bindForegroundBle();
+        const seq = ++this.fgFetchSeq;
+        this.fgFetchInFlight = true;
+        this.fgFetchStarted = now;
+        console.log('[WD_PAGE] fg fetch sent seq=' + seq + ' reason=' + reason + ' ready=' + mb.ready + ' port2=' + mb.appSidePort);
+
+        let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams;
+        if (this.conf.alarmSettings && this.conf.alarmSettings.fetchParams) {
+            fetchParams = this.conf.alarmSettings.fetchParams;
+        }
+        mb.requestCb({ method: Commands.getInfo, params: fetchParams }, { timeout: FG_FETCH_TIMEOUT_MS }, (error, data) => {
+            if (seq === this.fgFetchSeq) this.fgFetchInFlight = false;
+            const latency = Date.now() - now;
+            if (this.destroyed) return;
+            if (error) {
+                console.log('[WD_PAGE] fg fetch error seq=' + seq + ' latency=' + latency + 'ms error=' + error);
+                return;
+            }
+            const info = data && data.result;
+            if (!info || info.error) {
+                console.log('[WD_PAGE] fg fetch bad result seq=' + seq + ' ' + JSON.stringify(info || null));
+                return;
+            }
+            const text = typeof info === 'string' ? info : JSON.stringify(info);
+            const written = this.infoFile.overrideWithText(text);
+            console.log('[WD_PAGE] fg fetch ok seq=' + seq + ' latency=' + latency + 'ms written=' + written + ' bytes=' + text.length);
+            this.lastUpdateAttempt = Date.now();
+            this.lastUpdateSucessful = true;
+            const readRes = this.readInfoResult();
+            if (readRes.ok) {
+                this.updateWidgets();
+            }
+        });
+    }
+
+    releaseForegroundBle() {
+        if (this.fgFirstFetchTimer !== null) {
+            this.globalNS.clearTimeout(this.fgFirstFetchTimer);
+            this.fgFirstFetchTimer = null;
+        }
+        if (!this.fgMessageBuilder) return;
+        try {
+            // disConnect() only detaches listeners; it never closes the phone-side process.
+            this.fgMessageBuilder.disConnect();
+        } catch (e) {}
+        this.fgMessageBuilder = null;
+        this.fgFetchInFlight = false;
+        // Hand the BLE receiver back: the service re-registers createConnect in onEvent.
+        try {
+            startAppService({
+                file: BG_SERVICE_FILE,
+                param: 'mode=continuous&action=force_fetch&source=page_release',
+                complete_func: () => {}
+            });
+        } catch (e) {
+            console.log('[WD_PAGE] release startAppService error=' + e);
+        }
+        console.log('[WD_PAGE] fg ble released');
     }
 
     fetchRemoteInfo(options = {}) {
@@ -903,6 +1020,7 @@ class Watchdrip {
 
     onDestroy() {
         this.destroyed = true;
+        this.releaseForegroundBle();
         this.cancelCacheReadRetry();
         this.cancelCacheRefresh();
         this.conf.save();
@@ -923,6 +1041,7 @@ Page({
         this.p = p;
     },
     build() {
+        console.log('[WD_PAGE] foreground on');
         logger.debug("page build invoked");
         try {
             debug = new DebugText();
@@ -953,6 +1072,7 @@ Page({
         }
     },
     onDestroy() {
+        console.log('[WD_PAGE] foreground off');
         logger.debug("page onDestroy invoked");
         if (watchdrip) {
             watchdrip.onDestroy();

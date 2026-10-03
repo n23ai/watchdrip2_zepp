@@ -5,14 +5,14 @@
     "appName": "WatchDrip2_zepp",
     "appType": "app",
     "version": {
-      "code": 30,
-      "name": "1.0.26"
+      "code": 35,
+      "name": "1.0.31"
     },
     "vender": "n23ai",
     "description": "The watchface for watchdrip application",
     "icon": "icon.png"
   },
-  "permissions": ["data:os.device.info", "device:os.ble", "device:os.bg_service", "device:os.alarm"],
+  "permissions": ["data:os.device.info", "device:os.ble", "device:os.bg_service"],
   "runtime": {
     "apiVersion": {
       "compatible": "3.0.0",
@@ -39,6 +39,19 @@
           "path": "setting/index"
         },
         "app-widget": {
+          "widgets": [
+            {
+              "path": "data-widget/index",
+              "name": "WatchDrip2 Widget",
+              "icon": "icon.png",
+              "preview": "icon.png",
+              "runtime": {
+                "type": "js"
+              }
+            }
+          ]
+        },
+        "secondary-widget": {
           "widgets": [
             {
               "path": "data-widget/index",
@@ -114,11 +127,25 @@
             "name": "WatchDrip2"
           }
         ]
+      },
+      "secondary-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
       }
     },
     "ru-RU": {
       "appName": "WatchDrip2",
       "app-widget": {
+        "widgets": [
+          {
+            "name": "WatchDrip2"
+          }
+        ]
+      },
+      "secondary-widget": {
         "widgets": [
           {
             "name": "WatchDrip2"

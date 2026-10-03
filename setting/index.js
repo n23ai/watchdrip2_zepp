@@ -14,11 +14,11 @@ try {
 
     const S = {
       page: {
+        flex: 1,
         padding: '14px',
         backgroundColor: C.bg,
         display: 'flex',
         flexDirection: 'column',
-        minHeight: '100vh',
         boxSizing: 'border-box'
       },
       card: {
@@ -239,7 +239,7 @@ try {
           ]);
         } catch (err) {
           console.log('AppSettingsPage build error: ' + err);
-          return View({ style: { padding: '16px', backgroundColor: '#000000', minHeight: '100vh' } }, [
+          return View({ style: { flex: 1, padding: '16px', backgroundColor: '#000000' } }, [
             View({ style: { backgroundColor: '#1c1c1e', borderRadius: '12px', padding: '16px' } }, [
               Text({ style: { color: '#ff453a', fontSize: '16px', fontWeight: 'bold' } }, ['Ошибка рендеринга настроек']),
               Text({ style: { color: '#8e8e93', fontSize: '13px', marginTop: '8px' } }, [String(err && (err.stack || err.message || err))])

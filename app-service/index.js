@@ -1,5 +1,5 @@
 import { log } from '@zos/utils'
-import { writeFileSync, statSync } from '@zos/fs'
+import { writeFileSync, statSync, renameSync } from '@zos/fs'
 import { MessageBuilder } from "../shared/message"
 import { getPackageInfo } from '@zos/app'
 import { WF_INFO_FILE, WATCHDRIP_ALARM_SETTINGS_DEFAULTS } from "../utils/config/global-constants"
@@ -12,6 +12,14 @@ import { FsTools } from "../utils/path"
 console.log("watchdrip service: module loading start")
 const logger = log.getLogger("watchdrip_service")
 const ble = require('@zos/ble')
+
+// Temporary file used for verified writes. The main info.json is only replaced after
+// the temp file is confirmed non-empty, so a blocked write (spec: App Service file
+// writes are only allowed with the screen off / AOD) can never truncate info.json.
+const WF_INFO_TMP_FILE = 'info.tmp.json'
+// App Service has no JS timers (spec guides/framework.md:189). A request is
+// considered lost when it is still in flight on the next minute tick older than this.
+const REQUEST_DEADLINE_MS = 15000
 
 let rawTimeSensor = null
 try {
@@ -31,38 +39,90 @@ let lastMinuteTick = 0
 let cancelActiveRequest = null
 let lastSavedSignature = { time: null, val: null, isError: null }
 
+// Diagnostics (kept in memory; never written to flash on routine ticks).
+let serviceStartedAt = 0
+let tickSeq = 0
+let fetchSeq = 0
+let lastStage = 'none'
+let okCount = 0
+let failCount = 0
+let deferredCount = 0
+
+// Latest fetched payload that could not be persisted yet (screen on).
+let pendingInfo = null
+// Re-register the BLE receiver only after a connection reset, not on every fetch.
+let needsBleRebind = false
+
+function wdLog(tag, text) {
+  const line = '[' + tag + '] ' + text
+  console.log('watchdrip service ' + line)
+  logger.log(line)
+}
+
+function setStage(stage) {
+  lastStage = stage
+}
+
+function uptimeSec() {
+  return serviceStartedAt ? Math.round((Date.now() - serviceStartedAt) / 1000) : 0
+}
+
+function rebindBle(reason) {
+  if (!ble || typeof ble.createConnect !== 'function' || !messageBuilder) return
+  try {
+    ble.createConnect((index, data, size) => {
+      messageBuilder.onFragmentData(data)
+    })
+    wdLog('WD_REQ', 'ble_rebind reason=' + reason)
+  } catch (e) {
+    logger.error('failed to rebind ble: ' + e)
+  }
+}
+
+function expireActiveRequest(reason, age) {
+  wdLog('WD_REQ', 'outcome=expired reason=' + reason + ' seq=' + fetchSeq + ' age=' + age + 'ms')
+  markBackgroundDebug('fetch_expired', { reason, age }, Date.now())
+  failCount++
+  if (cancelActiveRequest) {
+    try { cancelActiveRequest() } catch (eCancel) {}
+    cancelActiveRequest = null
+  }
+  if (messageBuilder) {
+    try { messageBuilder.resetConnection(reason) } catch (eReset) {}
+  }
+  needsBleRebind = true
+  fetchInFlight = false
+}
+
 function onMinuteCallback() {
-  lastMinuteTick = Date.now()
+  const now = Date.now()
+  tickSeq++
+  const gapSec = lastMinuteTick ? Math.round((now - lastMinuteTick) / 1000) : 0
+  lastMinuteTick = now
   const minute = timeSensor ? timeSensor.getMinutes() : -1
   const bleStatus = ble && typeof ble.connectStatus === 'function' ? ble.connectStatus() : 'na'
-  const currentPort2 = messageBuilder ? messageBuilder.appSidePort : 0
-  const tickLog = '[WD_TICK] min=' + minute + ' ble=' + bleStatus + ' port2=' + currentPort2 + ' inFlight=' + fetchInFlight
-  logger.log(tickLog)
-  console.log('watchdrip service ' + tickLog)
-  markBackgroundDebug('service_minute_tick', { minute, bleStatus, port2: currentPort2 }, Date.now())
+  const ready = messageBuilder ? messageBuilder.ready : false
+  const port2 = messageBuilder ? messageBuilder.appSidePort : 0
+  wdLog('WD_TICK', 'seq=' + tickSeq + ' gap=' + gapSec + 's min=' + minute + ' ble=' + bleStatus +
+    ' ready=' + ready + ' port2=' + port2 + ' inFlight=' + fetchInFlight +
+    ' pending=' + !!pendingInfo + ' uptime=' + uptimeSec() + 's ok=' + okCount +
+    ' fail=' + failCount + ' deferred=' + deferredCount)
+  markBackgroundDebug('service_minute_tick', { minute, bleStatus, port2, seq: tickSeq, gap: gapSec }, now)
+  setStage('tick')
 
-  if (fetchInFlight) {
-    const inFlightAge = Date.now() - lastFetchStarted
-    if (inFlightAge > 15000) {
-      console.log('watchdrip service: watchdog recovery stale fetch age=' + inFlightAge + 'ms')
-      logger.log('Watchdog: fetch stuck for ' + inFlightAge + 'ms, resetting connection')
-      markBackgroundDebug('fetch_stale_watchdog_15s', { age: inFlightAge }, Date.now())
-      if (cancelActiveRequest) {
-        try { cancelActiveRequest() } catch (eCancel) {}
-        cancelActiveRequest = null
-      }
-      if (messageBuilder) {
-        try { messageBuilder.resetConnection('watchdog_stale_15s') } catch (eReset) {}
-      }
-      fetchInFlight = false
-    } else {
-      logger.log('fetch in flight, skipping tick')
-      return
-    }
+  // Retry persisting a payload that could not be written while the screen was on.
+  if (pendingInfo) {
+    flushPendingInfo('tick')
   }
 
-  if (messageBuilder && (!messageBuilder.ready || messageBuilder.appSidePort === 0)) {
-    try { messageBuilder.sendShake() } catch (eShake) {}
+  if (fetchInFlight) {
+    const inFlightAge = now - lastFetchStarted
+    if (inFlightAge > REQUEST_DEADLINE_MS) {
+      expireActiveRequest('watchdog_stale_15s', inFlightAge)
+    } else {
+      wdLog('WD_REQ', 'skip tick: in flight age=' + inFlightAge + 'ms')
+      return
+    }
   }
 
   fetchInfo(false)
@@ -103,14 +163,60 @@ function markFetchFailure(stage, error) {
   }
 }
 
+function fileSize(path) {
+  try {
+    const st = statSync({ path })
+    return st ? st.size : 0
+  } catch (e) {
+    return 0
+  }
+}
+
+/**
+ * Writes dataStr to info.json without ever truncating the existing file.
+ * 1. write to info.tmp.json and verify its size;
+ * 2. rename it over info.json (fallback: direct write, now known to be allowed).
+ * Returns the verified size of info.json, or 0 when writing is currently blocked.
+ */
+function writeInfoVerified(dataStr) {
+  const expected = dataStr.length
+  let tmpSize = 0
+  try {
+    writeFileSync({ path: WF_INFO_TMP_FILE, data: FsTools.str2ab(dataStr) })
+    tmpSize = fileSize(WF_INFO_TMP_FILE)
+  } catch (eTmp) {
+    wdLog('WD_SAVE', 'tmp write error=' + eTmp)
+  }
+  if (tmpSize < 20) {
+    wdLog('WD_SAVE', 'blocked tmpSize=' + tmpSize + ' expected=' + expected)
+    return 0
+  }
+
+  let renamed = false
+  try {
+    const res = renameSync({ oldPath: WF_INFO_TMP_FILE, newPath: WF_INFO_FILE })
+    renamed = res === 0 || res === true || res === undefined
+    if (!renamed) wdLog('WD_SAVE', 'rename result=' + res)
+  } catch (eRename) {
+    wdLog('WD_SAVE', 'rename error=' + eRename)
+  }
+
+  let finalSize = renamed ? fileSize(WF_INFO_FILE) : 0
+  if (finalSize < 20) {
+    // Rename unsupported/failed: writing is allowed right now (tmp verified), so write directly.
+    try {
+      writeFileSync({ path: WF_INFO_FILE, data: FsTools.str2ab(dataStr) })
+      finalSize = fileSize(WF_INFO_FILE)
+    } catch (eDirect) {
+      wdLog('WD_SAVE', 'direct write error=' + eDirect)
+    }
+  }
+  return finalSize >= 20 ? finalSize : 0
+}
+
 function ensureInitialInfoFile() {
   try {
-    let fileSize = 0
-    try {
-      const st = statSync({ path: WF_INFO_FILE })
-      fileSize = st ? st.size : 0
-    } catch (eStat) {}
-    if (fileSize < 20) {
+    if (fileSize(WF_INFO_FILE) < 20) {
       console.log('watchdrip service initializing fallback info.json')
       const fallbackObj = {
         bg: {
@@ -123,14 +229,18 @@ function ensureInitialInfoFile() {
           now: Date.now()
         }
       }
-      writeFileSync({
-        path: WF_INFO_FILE,
-        data: JSON.stringify(fallbackObj),
-        options: { encoding: 'utf8' }
-      })
+      writeInfoVerified(JSON.stringify(fallbackObj))
     }
   } catch (e) {
     logger.error('ensureInitialInfoFile error: ' + e)
+  }
+}
+
+function signatureOf(bg) {
+  return {
+    time: bg && bg.time !== undefined ? bg.time : null,
+    val: bg && bg.val !== undefined ? bg.val : null,
+    isError: bg && bg.isError !== undefined ? bg.isError : null,
   }
 }
 
@@ -147,25 +257,16 @@ function saveInfoFile(jsonString, newInfo = null) {
 
   const bg = newInfo && typeof newInfo === 'object' && newInfo.bg ? newInfo.bg : null
 
-  let currentFileSize = 0
-  try {
-    const st = statSync({ path: WF_INFO_FILE })
-    currentFileSize = st ? st.size : 0
-  } catch (eSt) {}
-
-  if (currentFileSize > 20 && bg && lastSavedSignature.time !== null) {
-    const bgTime = bg.time !== undefined ? bg.time : null
-    const bgVal = bg.val !== undefined ? bg.val : null
-    const bgIsError = bg.isError !== undefined ? bg.isError : null
-
+  if (bg && lastSavedSignature.time !== null && fileSize(WF_INFO_FILE) > 20) {
+    const sig = signatureOf(bg)
     if (
-      bgTime === lastSavedSignature.time &&
-      bgVal === lastSavedSignature.val &&
-      bgIsError === lastSavedSignature.isError
+      sig.time === lastSavedSignature.time &&
+      sig.val === lastSavedSignature.val &&
+      sig.isError === lastSavedSignature.isError
     ) {
-      logger.log('SmartFlush: skip write, data unchanged')
-      console.log('watchdrip service SmartFlush: skip write, data unchanged')
-      return 0
+      wdLog('WD_SAVE', 'SmartFlush: skip write, data unchanged')
+      pendingInfo = null
+      return -1
     }
   }
 
@@ -175,83 +276,33 @@ function saveInfoFile(jsonString, newInfo = null) {
     return 0
   }
 
-  let writeSuccess = false
-  try {
-    writeFileSync({
-      path: WF_INFO_FILE,
-      data: dataToWrite,
-      options: { encoding: 'utf8' }
-    })
-    writeSuccess = true
-  } catch (e1) {
-    logger.error('[SAVE_INFO] utf8 write error: ' + e1)
-    try {
-      const buf = FsTools.str2ab(dataToWrite)
-      writeFileSync({
-        path: WF_INFO_FILE,
-        data: buf
-      })
-      writeSuccess = true
-    } catch (e2) {
-      logger.error('[SAVE_INFO] ArrayBuffer write error: ' + e2)
-    }
+  const finalSize = writeInfoVerified(dataToWrite)
+  if (finalSize > 0) {
+    if (bg) lastSavedSignature = signatureOf(bg)
+    pendingInfo = null
+    wdLog('WD_SAVE', 'verified size=' + finalSize)
+  } else {
+    // Keep the payload in memory and retry on the next tick / event (screen likely on).
+    pendingInfo = { json: dataToWrite, obj: newInfo }
+    deferredCount++
+    wdLog('WD_SAVE', 'deferred (write blocked) count=' + deferredCount)
   }
-
-  if (writeSuccess && bg) {
-    lastSavedSignature = {
-      time: bg.time !== undefined ? bg.time : null,
-      val: bg.val !== undefined ? bg.val : null,
-      isError: bg.isError !== undefined ? bg.isError : null,
-    }
-  }
-
-  let finalSize = 0
-  try {
-    const stFinal = statSync({ path: WF_INFO_FILE })
-    finalSize = stFinal ? stFinal.size : 0
-  } catch (eFinal) {}
-  logger.log('[SAVE_INFO] final info.json size=' + finalSize)
-  console.log('watchdrip service [SAVE_INFO] final info.json size=' + finalSize)
   return finalSize
+}
+
+function flushPendingInfo(source) {
+  if (!pendingInfo) return
+  const { json, obj } = pendingInfo
+  const size = saveInfoFile(json, obj)
+  if (size > 0) {
+    wdLog('WD_SAVE', 'pending flushed source=' + source + ' size=' + size)
+    markBackgroundDebug('pending_flushed', { source, bytes: size }, Date.now())
+  }
 }
 
 function fetchInfo(force = false) {
   try {
     const now = Date.now()
-    const minInterval = force ? 4000 : 10000
-    if (lastFetchStarted && (now - lastFetchStarted) < minInterval) {
-      logger.log('fetchInfo skipped: too soon (' + (now - lastFetchStarted) + 'ms)')
-      return
-    }
-    if (fetchInFlight) {
-      const inFlightAge = now - lastFetchStarted
-      const staleThreshold = force ? 10000 : 15000
-      if (inFlightAge < staleThreshold) {
-        logger.log('fetchInfo skipped: in flight (' + inFlightAge + 'ms)')
-        return
-      }
-      console.log('watchdrip service recovering stale fetch age=' + inFlightAge)
-      logger.log('recovering stale fetch age=' + inFlightAge)
-      markBackgroundDebug('fetch_stale_recovered', { age: inFlightAge }, now)
-      if (cancelActiveRequest) {
-        try { cancelActiveRequest() } catch (eCancel) {}
-        cancelActiveRequest = null
-      }
-      if (messageBuilder) {
-        try { messageBuilder.resetConnection('fetch_stale_recovered') } catch (eReset) {}
-      }
-      fetchInFlight = false
-    }
-    logger.log('fetchInfo triggered' + (force ? ' (forced)' : ''))
-    console.log('watchdrip service fetchInfo triggered' + (force ? ' (forced)' : ''))
-    markBackgroundDebug('fetch_start', { force: !!force }, now)
-    fetchInFlight = true
-    lastFetchStarted = now
-
-    let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams
-    if (conf && conf.alarmSettings && conf.alarmSettings.fetchParams) {
-      fetchParams = conf.alarmSettings.fetchParams
-    }
 
     if (!messageBuilder) {
       const { appId } = getPackageInfo()
@@ -259,31 +310,65 @@ function fetchInfo(force = false) {
       messageBuilder.connect()
     }
 
-    if (ble && typeof ble.createConnect === 'function' && messageBuilder) {
-      try {
-        ble.createConnect((index, data, size) => {
-          messageBuilder.onFragmentData(data)
-        })
-      } catch (e) {
-        logger.error('failed to rebind ble: ' + e)
-      }
+    // The foreground page owns the BLE receiver while it is open (it registers its own
+    // ble.createConnect). Re-register ours on every cycle - before any skip check - so an
+    // in-flight answer is not delivered to a released page callback.
+    needsBleRebind = false
+    rebindBle(force ? 'event' : 'tick')
+
+    const minInterval = force ? 4000 : 10000
+    if (lastFetchStarted && (now - lastFetchStarted) < minInterval) {
+      wdLog('WD_REQ', 'skip: too soon (' + (now - lastFetchStarted) + 'ms)')
+      return
     }
+    if (fetchInFlight) {
+      const inFlightAge = now - lastFetchStarted
+      const staleThreshold = force ? 10000 : REQUEST_DEADLINE_MS
+      if (inFlightAge < staleThreshold) {
+        wdLog('WD_REQ', 'skip: in flight (' + inFlightAge + 'ms)')
+        return
+      }
+      expireActiveRequest('fetch_stale_recovered', inFlightAge)
+    }
+
+    let fetchParams = WATCHDRIP_ALARM_SETTINGS_DEFAULTS.fetchParams
+    if (conf && conf.alarmSettings && conf.alarmSettings.fetchParams) {
+      fetchParams = conf.alarmSettings.fetchParams
+    }
+    fetchSeq++
+    const seq = fetchSeq
+    const readyAtSend = messageBuilder.ready
+    const portAtSend = messageBuilder.appSidePort
+    wdLog('WD_REQ', 'sent seq=' + seq + (force ? ' forced' : '') + ' ready=' + readyAtSend + ' port2=' + portAtSend +
+      (readyAtSend && portAtSend ? '' : ' (waiting shake)'))
+    markBackgroundDebug('fetch_start', { force: !!force, seq }, now)
+    setStage('fetch_sent')
+    fetchInFlight = true
+    lastFetchStarted = now
 
     cancelActiveRequest = messageBuilder.requestCb({
       method: Commands.getInfo,
       params: fetchParams,
-    }, { timeout: 15000 }, (error, data) => {
-      cancelActiveRequest = null
-      fetchInFlight = false
+    }, { timeout: REQUEST_DEADLINE_MS, noTimers: true }, (error, data) => {
+      if (seq !== fetchSeq) {
+        // Late answer for an already expired request: ignore state, but keep data if valid.
+        wdLog('WD_REQ', 'late response seq=' + seq + ' current=' + fetchSeq)
+      } else {
+        cancelActiveRequest = null
+        fetchInFlight = false
+      }
+      const latency = Date.now() - now
       if (error) {
-        console.log("watchdrip service fetch error: " + error)
-        logger.log("fetch error: " + error)
+        failCount++
+        setStage('fetch_error')
+        wdLog('WD_REQ', 'outcome=error seq=' + seq + ' latency=' + latency + 'ms error=' + error)
         markFetchFailure('fetch_error', String(error))
         return
       }
-      logger.log("received data")
-      console.log("watchdrip service received data")
-      markBackgroundDebug('fetch_received', {}, Date.now())
+      okCount++
+      setStage('fetch_received')
+      wdLog('WD_REQ', 'outcome=ok seq=' + seq + ' latency=' + latency + 'ms')
+      markBackgroundDebug('fetch_received', { seq, latency }, Date.now())
 
       let { result: info = {}, meta = {} } = data || {}
       if (meta && meta.timerType && conf && conf.settings && conf.settings.timerType !== meta.timerType) {
@@ -297,24 +382,22 @@ function fetchInfo(force = false) {
           const infoObj = typeof info === 'string' ? JSON.parse(info) : info
           const jsonString = typeof info === 'string' ? info : JSON.stringify(info)
           const savedSize = saveInfoFile(jsonString, infoObj)
-          if (savedSize === 0) {
-            markBackgroundDebug('fetch_smart_flush_skip', { val: infoObj && infoObj.bg && infoObj.bg.val }, Date.now())
-          } else {
+          const flush = savedSize > 0 ? 'WRITTEN' : (savedSize < 0 ? 'SKIPPED' : 'DEFERRED')
+          if (savedSize > 0) {
             const debug = markBackgroundDebug('fetch_saved', { result: 'ok', infoType: typeof info, bytes: savedSize }, Date.now())
             if (conf && debug) conf.backgroundDebug = debug
+          } else {
+            markBackgroundDebug(savedSize < 0 ? 'fetch_smart_flush_skip' : 'fetch_save_deferred',
+              { val: infoObj && infoObj.bg && infoObj.bg.val }, Date.now())
           }
           if (conf) {
             conf.infoLastUpdAttempt = Date.now()
             conf.infoLastUpd = conf.infoLastUpdAttempt
             conf.infoLastUpdSucess = true
           }
-          const sugarLogLine = formatSugarLog('[WD_BG SERVICE WRITE]', info, { file: WF_INFO_FILE, flush: savedSize === 0 ? 'SKIPPED' : 'WRITTEN' })
+          const sugarLogLine = formatSugarLog('[WD_BG SERVICE WRITE]', info, { file: WF_INFO_FILE, flush })
           console.log(sugarLogLine)
           logger.log(sugarLogLine)
-          if (savedSize > 0) {
-            console.log("watchdrip service saved info.json successfully bytes=" + savedSize)
-            logger.log("saved info.json successfully bytes=" + savedSize)
-          }
         } catch (e) {
           markFetchFailure('fetch_save_error', String(e))
         }
@@ -324,6 +407,8 @@ function fetchInfo(force = false) {
       }
     })
   } catch (e) {
+    setStage('fetch_catch_sync')
+    wdLog('WD_REQ', 'sync error=' + e)
     markBackgroundDebug('fetch_catch_sync', { error: String(e) }, Date.now())
   }
 }
@@ -331,18 +416,25 @@ function fetchInfo(force = false) {
 AppService({
   onEvent(params) {
     try {
-      console.log('watchdrip service onEvent: ' + params)
-      logger.log('service onEvent: ' + params)
+      wdLog('WD_LIFE', 'onEvent params=' + params + ' uptime=' + uptimeSec() + 's')
       markBackgroundDebug('service_onEvent', { params: String(params || '') }, Date.now())
+      if (pendingInfo) {
+        flushPendingInfo('event')
+      }
       const paramStr = typeof params === 'string' ? params : (params && typeof params === 'object' ? JSON.stringify(params) : '')
       const isForceFetch = paramStr.indexOf('action=force_fetch') !== -1 || (params && params.action === 'force_fetch')
-      if (isForceFetch) {
-        console.log('watchdrip service: screen wake force_fetch received')
-        logger.log('screen wake force_fetch received')
-        fetchInfo(true)
-      } else {
-        fetchInfo(false)
+      if (paramStr.indexOf('source=page_release') !== -1 && messageBuilder) {
+        // The page just dropped its BLE receiver; our ready/port2 state is not trustworthy
+        // (1.0.30 test: first request after release never reached the phone). Re-shake.
+        if (cancelActiveRequest) {
+          try { cancelActiveRequest() } catch (eCancel) {}
+          cancelActiveRequest = null
+        }
+        fetchInFlight = false
+        lastFetchStarted = 0
+        try { messageBuilder.resetConnection('page_release') } catch (eReset) {}
       }
+      fetchInfo(isForceFetch)
     } catch (e) {
       console.log('watchdrip service onEvent error: ' + e)
     }
@@ -350,8 +442,9 @@ AppService({
 
   onInit(params) {
     try {
+      serviceStartedAt = Date.now()
+      wdLog('WD_LIFE', 'onInit params=' + params)
       console.log('watchdrip Service onInit: ' + params)
-      logger.log('Service onInit: ' + params)
 
       markBackgroundDebug('service_onInit', { params: String(params || ''), result: 'continuous' }, Date.now())
       conf = new WatchdripConfig()
@@ -383,9 +476,14 @@ AppService({
   },
 
   onDestroy() {
-    console.log('watchdrip service onDestroy')
-    logger.log('Service onDestroy')
-    markBackgroundDebug('service_onDestroy', {}, Date.now())
+    wdLog('WD_LIFE', 'onDestroy uptime=' + uptimeSec() + 's ticks=' + tickSeq + ' fetches=' + fetchSeq +
+      ' ok=' + okCount + ' fail=' + failCount + ' deferred=' + deferredCount +
+      ' lastStage=' + lastStage + ' inFlight=' + fetchInFlight + ' pending=' + !!pendingInfo)
+    markBackgroundDebug('service_onDestroy', {
+      uptime: uptimeSec(), ticks: tickSeq, fetches: fetchSeq, ok: okCount, fail: failCount, lastStage,
+    }, Date.now())
+    // No flash write here: if the screen is on, an App Service write may be blocked or
+    // truncate config.json (spec guides/framework.md:202). The WD_LIFE log line is the record.
     if (cancelActiveRequest) {
       try { cancelActiveRequest(); } catch (eCancel) {}
       cancelActiveRequest = null

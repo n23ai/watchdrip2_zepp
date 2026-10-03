@@ -247,24 +247,15 @@ export class Path {
             text = String(text !== undefined && text !== null ? text : '');
         }
         try {
+            const buf = FsTools.str2ab(text);
             writeFileSync({
                 path: this.relativePath,
-                data: text,
-                options: { encoding: 'utf8' }
+                data: buf
             });
             return true;
-        } catch (eDirect) {
-            try {
-                const buf = FsTools.str2ab(text);
-                writeFileSync({
-                    path: this.relativePath,
-                    data: buf
-                });
-                return true;
-            } catch (eDirect2) {
-                console.log('[PATH overrideWithText error] ' + eDirect2);
-                return false;
-            }
+        } catch (e) {
+            console.log('[PATH overrideWithText error] ' + e);
+            return false;
         }
     }
 
